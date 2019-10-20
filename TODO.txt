@@ -40,4 +40,4 @@
 ------------------------------------------------------------------------------------------------------------------
 
 - list all entries since the beginning of time (maybe start a month back or something)
--  
+- need to have the source organization at the bottom of the event if the dest-cal isn't an org dest-cal 

@@ -1,11 +1,9 @@
 package com.j256.calsync.data;
 
-import com.google.api.services.calendar.Calendar;
-
 /**
  * Calendar that we are reading events from.
  */
-public class DestCal {
+public class SyncedCalendar {
 
 	private String calendarId;
 	private String calendarName;
@@ -14,16 +12,13 @@ public class DestCal {
 	// organization that if specified (and the category is null) will get all organization events
 	private String organization;
 
-	// associated service
-	private transient Calendar service;
-
 	// contactEmail, contactPhone, lastUpdate
 
-	public DestCal() {
+	public SyncedCalendar() {
 		// for ormlite
 	}
 
-	public DestCal(String calendarId, String calendarName, String category, String organization) {
+	public SyncedCalendar(String calendarId, String calendarName, String category, String organization) {
 		this.calendarId = calendarId;
 		this.calendarName = calendarName;
 		this.category = category;
@@ -46,11 +41,21 @@ public class DestCal {
 		return organization;
 	}
 
-	public void setService(Calendar service) {
-		this.service = service;
+	@Override
+	public int hashCode() {
+		return calendarId.hashCode();
 	}
 
-	public Calendar getService() {
-		return service;
+	@Override
+	public boolean equals(Object obj) {
+		if (obj == null || getClass() != obj.getClass()) {
+			return false;
+		}
+		return calendarId.equals(((SyncedCalendar) obj).calendarId);
+	}
+
+	@Override
+	public String toString() {
+		return "DestCal [calendarName=" + calendarName + "]";
 	}
 }
