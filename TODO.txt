@@ -20,24 +20,5 @@
 
 ------------------------------------------------------------------------------------------------------------------
 
-- create a google calendar
-- give access to a specific user-id that the syncer uses:
-	uploader@lexington-calendar-sync-256503.iam.gserviceaccount.com
-- the syncer is configured with that "source" calendar id (i.e. your email address)
-	- has a organization ("Follen Church", "Temple Isaiah")
-- calendar has an optional default-category ("GVP")
-	- without the default category, "misc" is assumed
-	- with a default category, all events in that calendar will be associated with the category
-- the syncer is configured with destination calendars
-	- all events from the source calendars are copied into the destination calendars 
-- syncer also configured with a list of keywords that when included in the description of a calendar entry
-	turn it into a category
-	- entries can have multiple categories (homelessness and food-insecurity)
-- syncer adds to the bottom of each copied event:
-	- organization the originated it
-	- event-id that originated it
-
-------------------------------------------------------------------------------------------------------------------
-
 - list all entries since the beginning of time (maybe start a month back or something)
-- need to have the source organization at the bottom of the event if the dest-cal isn't an org dest-cal 
+- how do we handle having a contact (the leader) and how to protect their personal information

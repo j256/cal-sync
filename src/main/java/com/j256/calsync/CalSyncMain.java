@@ -10,13 +10,13 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Objects;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
-import com.google.api.client.util.DateTime;
 import com.google.api.services.calendar.Calendar;
 import com.google.api.services.calendar.CalendarScopes;
 import com.google.api.services.calendar.model.Event;
@@ -41,27 +41,27 @@ public class CalSyncMain {
 
 	private final SyncedCalendar[] sourceCals = new SyncedCalendar[] { //
 			new SyncedCalendar("utkkh55so5qug8uhpobtbsuokg@group.calendar.google.com",
-					"Follen Church Gun Violence Protection", "gvp", "Follen Church"), //
+					"Follen Church Gun Violence Protection", "gvp", "Follen Church", false), //
 			new SyncedCalendar("s86t7a2usugb40vocnijsenumc@group.calendar.google.com",
-					"Follen Church Food Insecurity Social Justice", "food", "Follen Church"), //
+					"Follen Church Food Insecurity Social Justice", "food", "Follen Church", false), //
 			new SyncedCalendar("ins6j0s8non558lam74ek17opk@group.calendar.google.com",
-					"Follen Church Social Justice General", null /* category */, "Follen Church"), //
+					"Follen Church Social Justice General", null /* category */, "Follen Church", true), //
 	};
 
 	private final SyncedCalendar[] destCals = new SyncedCalendar[] { //
 			new SyncedCalendar("bj6gac4eb0cmodtrvcvfmqkk3o@group.calendar.google.com", "Follen Church Social Justice",
-					null /* category */, "Follen Church"), //
+					null /* category */, "Follen Church", false), //
 			new SyncedCalendar("ce8j0kfr11kg0t8mgj3054sm5g@group.calendar.google.com",
-					"Lexington Gun Violence Social Action", "gvp", null /* no organization */), //
+					"Lexington Gun Violence Social Action", "gvp", null /* no organization */, false), //
 			new SyncedCalendar("p48r24isd9bbces9jfvvi9evk0@group.calendar.google.com",
-					"Lexington Food Insecurity Social Action", "food", null /* no organization */), //
+					"Lexington Food Insecurity Social Action", "food", null /* no organization */, false), //
 			new SyncedCalendar("ot2d2lis7hvatv7dcc6jlcf1rc@group.calendar.google.com", "Lexington Social Action",
-					null /* category */, null /* no organization */), //
+					null /* category */, null /* no organization */, false), //
 	};
 
 	private final KeywordCategory[] keywordCategories = new KeywordCategory[] { //
-			new KeywordCategory("foodcal", "food"), //
-			new KeywordCategory("gvpcal", "gvp"), //
+			new KeywordCategory("c:food", "food"), //
+			new KeywordCategory("c:guns", "gvp"), //
 	};
 
 	public static void main(String... args) throws IOException, GeneralSecurityException {
@@ -118,42 +118,6 @@ public class CalSyncMain {
 		}
 	}
 
-	public void foo(Calendar readOnlyService) throws IOException {
-		// List the next 10 events from the primary calendar.
-		DateTime now = new DateTime(System.currentTimeMillis() - 100000000);
-		int maxResults = 10;
-		// .setTimeMax(now)
-		Events events = readOnlyService.events()
-				.list("primary")
-				.setMaxResults(maxResults)
-				.setTimeMin(now)
-				.setOrderBy("startTime")
-				.setSingleEvents(true)
-				.setCalendarId("256.com@gmail.com")
-				.execute();
-		List<Event> items = events.getItems();
-		if (items.isEmpty()) {
-			System.out.println("No upcoming events found.");
-		} else {
-			System.out.println("Upcoming events");
-			for (Event event : items) {
-				DateTime start = event.getStart().getDateTime();
-				if (start == null) {
-					start = event.getStart().getDate();
-				}
-				System.out.printf("%s (%s)\n", event.getSummary(), start);
-				// if (event.getSummary().equals("Stuff happening")) {
-				// event.setSummary("Stuff happening again");
-				// Event newEvent = new Event().setStart(event.getStart())
-				// .setSummary("Stuff happening again")
-				// .setEnd(event.getEnd())
-				// .setAttachments(event.getAttachments());
-				// service.events().insert("256.com@gmail.com", newEvent).execute();
-				// }
-			}
-		}
-	}
-
 	private void resolveSourceCalendar(Calendar readWriteService, SyncedCalendar sourceCal,
 			Collection<Event> sourceEvents, Map<SyncedCalendar, Map<String, Event>> destCalEventMap)
 			throws IOException {
@@ -162,20 +126,42 @@ public class CalSyncMain {
 		for (Event event : sourceEvents) {
 			// check on event organization
 			String org = sourceCal.getOrganization();
+			String description = event.getDescription().trim();
 
 			// determine the event categories
 			categories.clear();
 			if (sourceCal.getCategory() != null) {
+				// if there is a default category on the calendar then add it in
 				categories.add(sourceCal.getCategory());
 			}
-			String description = event.getDescription();
+
+			// look for category keywords
+			boolean hasKeyword = false;
 			if (description != null) {
 				for (KeywordCategory keyCat : keywordCategories) {
-					if (description.contains(keyCat.getKeyword())) {
-						categories.add(keyCat.getCategory());
+					String keyword = keyCat.getKeyword();
+					int index = description.indexOf(keyword);
+					if (index < 0) {
+						continue;
 					}
+					// cut out the keyword itself out of the description
+					StringBuilder sb = new StringBuilder();
+					// cut out the keyword
+					sb.append(description, 0, index);
+					sb.append(description, index + keyword.length(), description.length());
+					categories.add(keyCat.getCategory());
+					event.setDescription(sb.toString().trim());
+					hasKeyword = true;
 				}
 			}
+
+			StringBuilder sb = new StringBuilder();
+			String normalDescription = event.getDescription();
+			if (normalDescription != null) {
+				sb.append(normalDescription).append("\n\n");
+			}
+			sb.append("From ").append(sourceCal.getOrganization()).append(" calendar.");
+			String orgDescription = sb.toString();
 
 			// for each dest-cal which matches org or category, see if it has the event
 			for (Entry<SyncedCalendar, Map<String, Event>> entry : destCalEventMap.entrySet()) {
@@ -186,8 +172,8 @@ public class CalSyncMain {
 				String destCat = destCal.getCategory();
 				// is it an organization roll-up calendar?
 				boolean match = false;
-				if (destOrg == null && destCat == null) {
-					// master roll-up
+				if (destOrg == null && destCat == null && (!sourceCal.isRequireCategory() || hasKeyword)) {
+					// master roll-up but only if one of the calendar matches
 					match = true;
 				} else if (destOrg != null) {
 					if (destOrg.equals(org)) {
@@ -202,61 +188,48 @@ public class CalSyncMain {
 				}
 
 				if (destOrg == null) {
-					StringBuilder sb = new StringBuilder();
-					if (event.getDescription() != null) {
-						sb.append(event.getDescription()).append('\n');
-					}
-					sb.append("Source: ").append(sourceCal.getOrganization());
-					event.setDescription(sb.toString());
+					event.setDescription(orgDescription);
+				} else {
+					event.setDescription(normalDescription);
 				}
 
-				System.out.println("Event '" + event.getSummary() + "' matched calendar: " + destCal.getCalendarName());
+				// System.out.println("Event '" + event.getSummary() + "' matched calendar: " +
+				// destCal.getCalendarName());
 
 				Event destEvent = destEvents.remove(event.getId());
 				if (destEvent == null) {
-					Event newEvent = new Event().setSummary(event.getSummary())
-							.setId(event.getId())
-							.setStart(event.getStart())
-							.setEnd(event.getEnd())
-							.setLocation(event.getLocation())
-							.setDescription(event.getDescription())
-							.setHtmlLink(event.getHtmlLink())
-							.setAttachments(event.getAttachments());
+					destEvent = new Event();
+					assignEventFields(destEvent, event);
 					System.out.println(
-							"Adding new event '" + event.getSummary() + "' to calendar: " + destCal.getCalendarName());
-					readWriteService.events().insert(destCal.getCalendarId(), newEvent).execute();
+							"Adding event '" + destEvent.getSummary() + "' to calendar: " + destCal.getCalendarName());
+					readWriteService.events().insert(destCal.getCalendarId(), destEvent).execute();
 				} else if (!eventEquals(event, destEvent)) {
 					System.out.println(
 							"Updating event '" + event.getSummary() + "' in calendar: " + destCal.getCalendarName());
-					destEvent.setSummary(event.getSummary());
-					destEvent.setStart(event.getStart());
-					destEvent.setEnd(event.getEnd());
-					destEvent.setLocation(event.getLocation());
-					destEvent.setDescription(event.getDescription());
-					destEvent.setHtmlLink(event.getHtmlLink());
-					destEvent.setAttachments(event.getAttachments());
+					assignEventFields(destEvent, event);
 					readWriteService.events().update(destCal.getCalendarId(), destEvent.getId(), destEvent).execute();
 				}
 			}
 		}
 	}
 
-	private boolean eventEquals(Event sourceEvent, Event destEvent) {
-		return (fieldEquals(sourceEvent.getSummary(), destEvent.getSummary())
-				&& fieldEquals(sourceEvent.getStart(), destEvent.getStart())
-				&& fieldEquals(sourceEvent.getEnd(), destEvent.getEnd())
-				&& fieldEquals(sourceEvent.getLocation(), destEvent.getLocation())
-				&& fieldEquals(sourceEvent.getDescription(), destEvent.getDescription())
-				&& fieldEquals(sourceEvent.getHtmlLink(), destEvent.getHtmlLink())
-				&& fieldEquals(sourceEvent.getAttachments(), destEvent.getAttachments()));
+	private void assignEventFields(Event destEvent, Event sourceEvent) {
+		destEvent.setSummary(sourceEvent.getSummary());
+		destEvent.setId(sourceEvent.getId());
+		destEvent.setStart(sourceEvent.getStart());
+		destEvent.setEnd(sourceEvent.getEnd());
+		destEvent.setLocation(sourceEvent.getLocation());
+		destEvent.setDescription(sourceEvent.getDescription());
+		destEvent.setAttachments(sourceEvent.getAttachments());
 	}
 
-	private boolean fieldEquals(Object field1, Object field2) {
-		if (field1 == null) {
-			return (field2 == null);
-		} else {
-			return field1.equals(field2);
-		}
+	private boolean eventEquals(Event sourceEvent, Event destEvent) {
+		return (Objects.equals(sourceEvent.getSummary(), destEvent.getSummary())
+				&& Objects.equals(sourceEvent.getStart(), destEvent.getStart())
+				&& Objects.equals(sourceEvent.getEnd(), destEvent.getEnd())
+				&& Objects.equals(sourceEvent.getLocation(), destEvent.getLocation())
+				&& Objects.equals(sourceEvent.getDescription(), destEvent.getDescription())
+				&& Objects.equals(sourceEvent.getAttachments(), destEvent.getAttachments()));
 	}
 
 	private void loadCalendarEntries(Calendar service, SyncedCalendar calendar, Map<String, Event> eventMap)

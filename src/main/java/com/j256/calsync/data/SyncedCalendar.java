@@ -11,6 +11,8 @@ public class SyncedCalendar {
 	private String category;
 	// organization that if specified (and the category is null) will get all organization events
 	private String organization;
+	// whether or not a calegory is required before the entry will be copied into another calendar
+	private boolean requireCategory;
 
 	// contactEmail, contactPhone, lastUpdate
 
@@ -18,11 +20,13 @@ public class SyncedCalendar {
 		// for ormlite
 	}
 
-	public SyncedCalendar(String calendarId, String calendarName, String category, String organization) {
+	public SyncedCalendar(String calendarId, String calendarName, String category, String organization,
+			boolean requireCategory) {
 		this.calendarId = calendarId;
 		this.calendarName = calendarName;
 		this.category = category;
 		this.organization = organization;
+		this.requireCategory = requireCategory;
 	}
 
 	public String getCalendarId() {
@@ -39,6 +43,10 @@ public class SyncedCalendar {
 
 	public String getOrganization() {
 		return organization;
+	}
+
+	public boolean isRequireCategory() {
+		return requireCategory;
 	}
 
 	@Override

@@ -10,6 +10,11 @@
 	<name>calsync</name>
 	<properties>
 		<!-- external package versions -->
+		<ormlite-version>4.48</ormlite-version>
+		<google-auth-version>0.18.0</google-auth-version>
+		<joda-time-version>1.5</joda-time-version>
+		<google-api-services-calendar-version>v3-rev305-1.23.0</google-api-services-calendar-version>
+		<google-api-services-oauth2-version>v2-rev150-1.23.0</google-api-services-oauth2-version>
 		<!-- tests -->
 		<easymock-version>2.3</easymock-version>
 		<junit-version>4.8.1</junit-version>
@@ -55,45 +60,30 @@
 		</plugins>
 	</build>
 	<dependencies>
-<!-- 		<dependency>
-			<groupId>com.google.api-client</groupId>
-			<artifactId>google-api-client</artifactId>
-			<version>1.23.0</version>
-		</dependency> -->
-		<dependency>
-			<groupId>com.google.oauth-client</groupId>
-			<artifactId>google-oauth-client-jetty</artifactId>
-			<version>1.23.0</version>
-		</dependency>
 		<dependency>
 			<groupId>com.google.apis</groupId>
 			<artifactId>google-api-services-calendar</artifactId>
-			<version>v3-rev305-1.23.0</version>
+			<version>${google-api-services-calendar-version}</version>
 		</dependency>
 		<dependency>
 			<groupId>com.google.apis</groupId>
 			<artifactId>google-api-services-oauth2</artifactId>
-			<version>v2-rev150-1.23.0</version>
-		</dependency>
-		<dependency>
-			<groupId>com.google.api-client</groupId>
-			<artifactId>google-api-client</artifactId>
-			<version>1.30.4</version>
+			<version>${google-api-services-oauth2-version}</version>
 		</dependency>
 		<dependency>
 			<groupId>joda-time</groupId>
 			<artifactId>joda-time</artifactId>
-			<version>1.5</version>
+			<version>${joda-time-version}</version>
 		</dependency>
 		<dependency>
 			<groupId>com.google.auth</groupId>
 			<artifactId>google-auth-library-credentials</artifactId>
-			<version>0.18.0</version>
+			<version>${google-auth-version}</version>
 		</dependency>
 		<dependency>
 			<groupId>com.google.auth</groupId>
 			<artifactId>google-auth-library-oauth2-http</artifactId>
-			<version>0.18.0</version>
+			<version>${google-auth-version}</version>
 		</dependency>
 
 		<!-- test dependencies -->
