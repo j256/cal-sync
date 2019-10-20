@@ -1,18 +1,30 @@
 package com.j256.calsync.data;
 
+import com.j256.ormlite.field.DatabaseField;
+import com.j256.ormlite.table.DatabaseTable;
+
 /**
  * Calendar that we are reading events from.
  */
+@DatabaseTable
 public class SyncedCalendar {
 
+	@DatabaseField(unique = true)
 	private String calendarId;
+	@DatabaseField(unique = true)
 	private String calendarName;
 	// type of the calendar if it is specific to a certain calendar group or null if misc or per-event type
+	@DatabaseField
 	private String category;
 	// organization that if specified (and the category is null) will get all organization events
+	@DatabaseField
 	private String organization;
-	// whether or not a calegory is required before the entry will be copied into another calendar
+	// whether or not a category is required before the entry will be copied into another calendar
+	@DatabaseField
 	private boolean requireCategory;
+	// whether or not a category is required before the entry will be copied into another calendar
+	@DatabaseField
+	private boolean source;
 
 	// contactEmail, contactPhone, lastUpdate
 
@@ -21,12 +33,13 @@ public class SyncedCalendar {
 	}
 
 	public SyncedCalendar(String calendarId, String calendarName, String category, String organization,
-			boolean requireCategory) {
+			boolean requireCategory, boolean source) {
 		this.calendarId = calendarId;
 		this.calendarName = calendarName;
 		this.category = category;
 		this.organization = organization;
 		this.requireCategory = requireCategory;
+		this.source = source;
 	}
 
 	public String getCalendarId() {
@@ -47,6 +60,10 @@ public class SyncedCalendar {
 
 	public boolean isRequireCategory() {
 		return requireCategory;
+	}
+
+	public boolean isSource() {
+		return source;
 	}
 
 	@Override

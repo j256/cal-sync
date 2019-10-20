@@ -2,7 +2,7 @@ package com.j256.calsync;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.security.GeneralSecurityException;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -21,8 +21,13 @@ import com.google.api.services.calendar.Calendar;
 import com.google.api.services.calendar.CalendarScopes;
 import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.Events;
+import com.j256.calsync.dao.KeywordCategoryDao;
+import com.j256.calsync.dao.KeywordCategoryDaoImpl;
+import com.j256.calsync.dao.SyncedCalendarDao;
+import com.j256.calsync.dao.SyncedCalendarDaoImpl;
 import com.j256.calsync.data.KeywordCategory;
 import com.j256.calsync.data.SyncedCalendar;
+import com.j256.ormlite.jdbc.JdbcConnectionSource;
 
 public class CalSyncMain {
 
@@ -39,37 +44,12 @@ public class CalSyncMain {
 
 	private static final JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
 
-	private final SyncedCalendar[] sourceCals = new SyncedCalendar[] { //
-			new SyncedCalendar("utkkh55so5qug8uhpobtbsuokg@group.calendar.google.com",
-					"Follen Church Gun Violence Protection", "gvp", "Follen Church", false), //
-			new SyncedCalendar("s86t7a2usugb40vocnijsenumc@group.calendar.google.com",
-					"Follen Church Food Insecurity Social Justice", "food", "Follen Church", false), //
-			new SyncedCalendar("ins6j0s8non558lam74ek17opk@group.calendar.google.com",
-					"Follen Church Social Justice General", null /* category */, "Follen Church", true), //
-	};
-
-	private final SyncedCalendar[] destCals = new SyncedCalendar[] { //
-			new SyncedCalendar("bj6gac4eb0cmodtrvcvfmqkk3o@group.calendar.google.com", "Follen Church Social Justice",
-					null /* category */, "Follen Church", false), //
-			new SyncedCalendar("ce8j0kfr11kg0t8mgj3054sm5g@group.calendar.google.com",
-					"Lexington Gun Violence Social Action", "gvp", null /* no organization */, false), //
-			new SyncedCalendar("p48r24isd9bbces9jfvvi9evk0@group.calendar.google.com",
-					"Lexington Food Insecurity Social Action", "food", null /* no organization */, false), //
-			new SyncedCalendar("ot2d2lis7hvatv7dcc6jlcf1rc@group.calendar.google.com", "Lexington Social Action",
-					null /* category */, null /* no organization */, false), //
-	};
-
-	private final KeywordCategory[] keywordCategories = new KeywordCategory[] { //
-			new KeywordCategory("c:food", "food"), //
-			new KeywordCategory("c:guns", "gvp"), //
-	};
-
-	public static void main(String... args) throws IOException, GeneralSecurityException {
+	public static void main(String... args) throws Exception {
 		final NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 		new CalSyncMain().doMain(httpTransport);
 	}
 
-	private void doMain(NetHttpTransport httpTransport) throws IOException {
+	private void doMain(NetHttpTransport httpTransport) throws IOException, SQLException {
 
 		InputStream in = CalSyncMain.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
 		GoogleCredential readOnlyCredential = GoogleCredential.fromStream(in).createScoped(READ_ONLY_SCOPE);
@@ -84,23 +64,38 @@ public class CalSyncMain {
 				.setApplicationName(APPLICATION_NAME)
 				.build();
 
+		JdbcConnectionSource connectionSource =
+				new JdbcConnectionSource("jdbc:h2:file:/var/cal-sync/cal-sync.db;USER=cal;PASSWORD=syncer");
+
+		KeywordCategoryDao keywordCategoryDao = new KeywordCategoryDaoImpl(connectionSource);
+		SyncedCalendarDao syncedCalendarDao = new SyncedCalendarDaoImpl(connectionSource);
+
+		List<KeywordCategory> keywordCategories = keywordCategoryDao.queryForAll();
+		List<SyncedCalendar> syncedCalendars = syncedCalendarDao.queryForAll();
+
 		Map<SyncedCalendar, Map<String, Event>> destCalEventMap = new HashMap<>();
 
 		System.out.println("Loading destination calendars:");
 		// open each destination calendar and load all of its events into our map
-		for (SyncedCalendar destCal : destCals) {
+		for (SyncedCalendar syncedCal : syncedCalendars) {
+			if (syncedCal.isSource()) {
+				continue;
+			}
 			Map<String, Event> eventMap = new HashMap<>();
-			destCalEventMap.put(destCal, eventMap);
-			loadCalendarEntries(readOnlyService, destCal, eventMap);
+			destCalEventMap.put(syncedCal, eventMap);
+			loadCalendarEntries(readOnlyService, syncedCal, eventMap);
 		}
 		System.out.println("-------------------------------------------------------");
 
 		// open each destination calendar and load all of its events into our map
-		for (SyncedCalendar sourceCal : sourceCals) {
-			System.out.println("Processing calendar: " + sourceCal.getCalendarName());
+		for (SyncedCalendar syncedCal : syncedCalendars) {
+			if (!syncedCal.isSource()) {
+				continue;
+			}
+			System.out.println("Processing calendar: " + syncedCal.getCalendarName());
 			Map<String, Event> eventMap = new HashMap<>();
-			loadCalendarEntries(readOnlyService, sourceCal, eventMap);
-			resolveSourceCalendar(readWriteService, sourceCal, eventMap.values(), destCalEventMap);
+			loadCalendarEntries(readOnlyService, syncedCal, eventMap);
+			resolveSourceCalendar(readWriteService, keywordCategories, syncedCal, eventMap.values(), destCalEventMap);
 			System.out.println("-------------------------");
 		}
 		System.out.println("-------------------------------------------------------");
@@ -118,9 +113,9 @@ public class CalSyncMain {
 		}
 	}
 
-	private void resolveSourceCalendar(Calendar readWriteService, SyncedCalendar sourceCal,
-			Collection<Event> sourceEvents, Map<SyncedCalendar, Map<String, Event>> destCalEventMap)
-			throws IOException {
+	private void resolveSourceCalendar(Calendar readWriteService, List<KeywordCategory> keywordCategories,
+			SyncedCalendar sourceCal, Collection<Event> sourceEvents,
+			Map<SyncedCalendar, Map<String, Event>> destCalEventMap) throws IOException {
 
 		List<String> categories = new ArrayList<>();
 		for (Event event : sourceEvents) {

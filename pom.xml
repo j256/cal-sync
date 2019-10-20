@@ -15,6 +15,7 @@
 		<joda-time-version>1.5</joda-time-version>
 		<google-api-services-calendar-version>v3-rev305-1.23.0</google-api-services-calendar-version>
 		<google-api-services-oauth2-version>v2-rev150-1.23.0</google-api-services-oauth2-version>
+		<h2-version>1.4.191</h2-version>
 		<!-- tests -->
 		<easymock-version>2.3</easymock-version>
 		<junit-version>4.8.1</junit-version>
@@ -84,6 +85,16 @@
 			<groupId>com.google.auth</groupId>
 			<artifactId>google-auth-library-oauth2-http</artifactId>
 			<version>${google-auth-version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.j256.ormlite</groupId>
+			<artifactId>ormlite-jdbc</artifactId>
+			<version>${ormlite-version}</version>
+		</dependency>
+		<dependency>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<version>${h2-version}</version>
 		</dependency>
 
 		<!-- test dependencies -->
