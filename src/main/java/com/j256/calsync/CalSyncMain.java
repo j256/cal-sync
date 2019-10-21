@@ -57,13 +57,14 @@ public class CalSyncMain {
 		GoogleCredential readWriteCredential = GoogleCredential.fromStream(in).createScoped(READ_WRITE_SCOPE);
 
 		// build a new authorized API client service
-		Calendar readWriteService = new Calendar.Builder(httpTransport, jsonFactory, readWriteCredential)
+		Calendar readWriteCalendarService = new Calendar.Builder(httpTransport, jsonFactory, readWriteCredential)
 				.setApplicationName(APPLICATION_NAME)
 				.build();
-		Calendar readOnlyService = new Calendar.Builder(httpTransport, jsonFactory, readOnlyCredential)
+		Calendar readOnlyCalendarService = new Calendar.Builder(httpTransport, jsonFactory, readOnlyCredential)
 				.setApplicationName(APPLICATION_NAME)
 				.build();
 
+		// create our database objects
 		JdbcConnectionSource connectionSource =
 				new JdbcConnectionSource("jdbc:h2:file:/var/cal-sync/cal-sync.db;USER=cal;PASSWORD=syncer");
 
@@ -81,9 +82,8 @@ public class CalSyncMain {
 			if (syncedCal.isSource()) {
 				continue;
 			}
-			Map<String, Event> eventMap = new HashMap<>();
+			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, syncedCal);
 			destCalEventMap.put(syncedCal, eventMap);
-			loadCalendarEntries(readOnlyService, syncedCal, eventMap);
 		}
 		System.out.println("-------------------------------------------------------");
 
@@ -93,14 +93,14 @@ public class CalSyncMain {
 				continue;
 			}
 			System.out.println("Processing calendar: " + syncedCal.getCalendarName());
-			Map<String, Event> eventMap = new HashMap<>();
-			loadCalendarEntries(readOnlyService, syncedCal, eventMap);
-			resolveSourceCalendar(readWriteService, keywordCategories, syncedCal, eventMap.values(), destCalEventMap);
+			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, syncedCal);
+			resolveSourceCalendar(readWriteCalendarService, keywordCategories, syncedCal, eventMap.values(),
+					destCalEventMap);
 			System.out.println("-------------------------");
 		}
 		System.out.println("-------------------------------------------------------");
 
-		// remove out-of-date entries
+		// remove out-of-date entries that are still left around in the destination evernt map
 		for (Entry<SyncedCalendar, Map<String, Event>> entry : destCalEventMap.entrySet()) {
 			SyncedCalendar destCal = entry.getKey();
 			Map<String, Event> destEvents = entry.getValue();
@@ -108,7 +108,7 @@ public class CalSyncMain {
 			for (Event event : destEvents.values()) {
 				System.out.println(
 						"Removing event '" + event.getSummary() + "' from calendar: " + destCal.getCalendarName());
-				readWriteService.events().delete(destCal.getCalendarId(), event.getId()).execute();
+				readWriteCalendarService.events().delete(destCal.getCalendarId(), event.getId()).execute();
 			}
 		}
 	}
@@ -120,7 +120,7 @@ public class CalSyncMain {
 		List<String> categories = new ArrayList<>();
 		for (Event event : sourceEvents) {
 			// check on event organization
-			String org = sourceCal.getOrganization();
+			String sourceOrg = sourceCal.getOrganization();
 			String description = event.getDescription().trim();
 
 			// determine the event categories
@@ -131,7 +131,7 @@ public class CalSyncMain {
 			}
 
 			// look for category keywords
-			boolean hasKeyword = false;
+			boolean hasCategory = false;
 			if (description != null) {
 				for (KeywordCategory keyCat : keywordCategories) {
 					String keyword = keyCat.getKeyword();
@@ -141,12 +141,11 @@ public class CalSyncMain {
 					}
 					// cut out the keyword itself out of the description
 					StringBuilder sb = new StringBuilder();
-					// cut out the keyword
 					sb.append(description, 0, index);
 					sb.append(description, index + keyword.length(), description.length());
 					categories.add(keyCat.getCategory());
 					event.setDescription(sb.toString().trim());
-					hasKeyword = true;
+					hasCategory = true;
 				}
 			}
 
@@ -167,11 +166,11 @@ public class CalSyncMain {
 				String destCat = destCal.getCategory();
 				// is it an organization roll-up calendar?
 				boolean match = false;
-				if (destOrg == null && destCat == null && (!sourceCal.isRequireCategory() || hasKeyword)) {
+				if (destOrg == null && destCat == null && (!sourceCal.isRequireCategory() || hasCategory)) {
 					// master roll-up but only if one of the calendar matches
 					match = true;
 				} else if (destOrg != null) {
-					if (destOrg.equals(org)) {
+					if (destOrg.equals(sourceOrg)) {
 						// we know that the org must be null here because org/category for a dest-cal doesn't make sense
 						match = true;
 					}
@@ -182,15 +181,17 @@ public class CalSyncMain {
 					continue;
 				}
 
+				/*
+				 * If our destination-org is not set then this is a roll-up cross organization calendar and display the
+				 * source org.
+				 */
 				if (destOrg == null) {
 					event.setDescription(orgDescription);
 				} else {
 					event.setDescription(normalDescription);
 				}
 
-				// System.out.println("Event '" + event.getSummary() + "' matched calendar: " +
-				// destCal.getCalendarName());
-
+				// now remove the event from detination calendar list to see if it exists
 				Event destEvent = destEvents.remove(event.getId());
 				if (destEvent == null) {
 					destEvent = new Event();
@@ -198,7 +199,10 @@ public class CalSyncMain {
 					System.out.println(
 							"Adding event '" + destEvent.getSummary() + "' to calendar: " + destCal.getCalendarName());
 					readWriteService.events().insert(destCal.getCalendarId(), destEvent).execute();
-				} else if (!eventEquals(event, destEvent)) {
+				} else if (eventEquals(event, destEvent)) {
+					// no changes need to be made
+				} else {
+					// need to update this event
 					System.out.println(
 							"Updating event '" + event.getSummary() + "' in calendar: " + destCal.getCalendarName());
 					assignEventFields(destEvent, event);
@@ -227,11 +231,12 @@ public class CalSyncMain {
 				&& Objects.equals(sourceEvent.getAttachments(), destEvent.getAttachments()));
 	}
 
-	private void loadCalendarEntries(Calendar service, SyncedCalendar calendar, Map<String, Event> eventMap)
+	private Map<String, Event> loadCalendarEntries(Calendar calendarService, SyncedCalendar calendar)
 			throws IOException {
+		Map<String, Event> eventMap = new HashMap<>();
 		String nextPageToken = null;
 		do {
-			Events events = service.events()
+			Events events = calendarService.events()
 					.list("primary")
 					.setPageToken(nextPageToken)
 					.setSingleEvents(true)
@@ -244,5 +249,6 @@ public class CalSyncMain {
 			nextPageToken = events.getNextPageToken();
 		} while (nextPageToken != null);
 		System.out.println("Loaded " + eventMap.size() + " events from " + calendar.getCalendarName());
+		return eventMap;
 	}
 }

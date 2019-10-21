@@ -6,6 +6,6 @@ import com.j256.ormlite.dao.Dao;
 /**
  * Data access object for the movie entity.
  */
-public interface SyncedCalendarDao extends Dao<SyncedCalendar, Integer> {
-
+public interface SyncedCalendarDao extends Dao<SyncedCalendar, Void> {
+	// empty
 }

@@ -9,7 +9,7 @@ import com.j256.ormlite.support.ConnectionSource;
 /**
  * DAO implementation for our KeywordCategory entity.
  */
-public class KeywordCategoryDaoImpl extends BaseDaoImpl<KeywordCategory, Integer> implements KeywordCategoryDao {
+public class KeywordCategoryDaoImpl extends BaseDaoImpl<KeywordCategory, Void> implements KeywordCategoryDao {
 
 	public KeywordCategoryDaoImpl(ConnectionSource connectionSource) throws SQLException {
 		super(connectionSource, KeywordCategory.class);
