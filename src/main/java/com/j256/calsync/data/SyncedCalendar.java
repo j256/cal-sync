@@ -9,6 +9,8 @@ import com.j256.ormlite.table.DatabaseTable;
 @DatabaseTable
 public class SyncedCalendar {
 
+	@DatabaseField(generatedId = true)
+	private int id;
 	@DatabaseField(unique = true)
 	private String calendarId;
 	@DatabaseField(unique = true)
@@ -40,6 +42,10 @@ public class SyncedCalendar {
 		this.organization = organization;
 		this.requireCategory = requireCategory;
 		this.source = source;
+	}
+
+	public int getId() {
+		return id;
 	}
 
 	public String getCalendarId() {

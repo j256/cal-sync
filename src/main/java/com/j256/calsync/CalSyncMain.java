@@ -23,9 +23,12 @@ import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.Events;
 import com.j256.calsync.dao.KeywordCategoryDao;
 import com.j256.calsync.dao.KeywordCategoryDaoImpl;
+import com.j256.calsync.dao.SyncPathDao;
+import com.j256.calsync.dao.SyncPathDaoImpl;
 import com.j256.calsync.dao.SyncedCalendarDao;
 import com.j256.calsync.dao.SyncedCalendarDaoImpl;
 import com.j256.calsync.data.KeywordCategory;
+import com.j256.calsync.data.SyncPath;
 import com.j256.calsync.data.SyncedCalendar;
 import com.j256.ormlite.jdbc.JdbcConnectionSource;
 
@@ -70,10 +73,37 @@ public class CalSyncMain {
 
 		KeywordCategoryDao keywordCategoryDao = new KeywordCategoryDaoImpl(connectionSource);
 		SyncedCalendarDao syncedCalendarDao = new SyncedCalendarDaoImpl(connectionSource);
+		SyncPathDao syncPathDao = new SyncPathDaoImpl(connectionSource);
 
 		List<KeywordCategory> keywordCategories = keywordCategoryDao.queryForAll();
 		List<SyncedCalendar> syncedCalendars = syncedCalendarDao.queryForAll();
+		List<SyncPath> syncPaths = syncPathDao.queryForAll();
 		connectionSource.close();
+
+		Map<Integer, SyncedCalendar> calIdMap = new HashMap<>();
+		for (SyncedCalendar syncedCalendar : syncedCalendars) {
+			calIdMap.put(syncedCalendar.getId(), syncedCalendar);
+		}
+
+		Map<SyncedCalendar, List<SyncedCalendar>> sourceCalToDestCalMap = new HashMap<>();
+		for (SyncPath syncPath : syncPaths) {
+			SyncedCalendar sourceCal = calIdMap.get(syncPath.getSourceCalendar().getId());
+			if (sourceCal == null) {
+				System.err.println("Unknown source-cal id: " + syncPath.getSourceCalendar().getId());
+				continue;
+			}
+			List<SyncedCalendar> destCals = sourceCalToDestCalMap.get(sourceCal);
+			if (destCals == null) {
+				destCals = new ArrayList<>();
+				sourceCalToDestCalMap.put(sourceCal, destCals);
+			}
+			SyncedCalendar destCal = calIdMap.get(syncPath.getDestCalendar().getId());
+			if (destCal == null) {
+				System.err.println("Unknown dest-cal id: " + syncPath.getDestCalendar().getId());
+			} else {
+				destCals.add(destCal);
+			}
+		}
 
 		Map<SyncedCalendar, Map<String, Event>> destCalEventMap = new HashMap<>();
 
@@ -88,14 +118,19 @@ public class CalSyncMain {
 		}
 		System.out.println("-------------------------------------------------------");
 
-		// open each destination calendar and load all of its events into our map
-		for (SyncedCalendar syncedCal : syncedCalendars) {
-			if (!syncedCal.isSource()) {
+		// open each source-cal calendar and sync it
+		for (SyncedCalendar sourceCal : syncedCalendars) {
+			if (!sourceCal.isSource()) {
 				continue;
 			}
-			System.out.println("Processing calendar: " + syncedCal.getCalendarName());
-			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, syncedCal);
-			syncSourceCalendar(readWriteCalendarService, keywordCategories, syncedCal, eventMap.values(),
+			List<SyncedCalendar> destCals = sourceCalToDestCalMap.get(sourceCal);
+			if (destCals == null || destCals.isEmpty()) {
+				System.out.println("No destination calendars for: " + sourceCal.getCalendarName());
+				continue;
+			}
+			System.out.println("Processing calendar: " + sourceCal.getCalendarName());
+			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, sourceCal);
+			syncSourceCalendar(readWriteCalendarService, keywordCategories, sourceCal, eventMap.values(), destCals,
 					destCalEventMap);
 			System.out.println("-------------------------");
 		}
@@ -115,7 +150,7 @@ public class CalSyncMain {
 	}
 
 	private void syncSourceCalendar(Calendar readWriteService, List<KeywordCategory> keywordCategories,
-			SyncedCalendar sourceCal, Collection<Event> sourceEvents,
+			SyncedCalendar sourceCal, Collection<Event> sourceEvents, List<SyncedCalendar> destCals,
 			Map<SyncedCalendar, Map<String, Event>> destCalEventMap) throws IOException {
 
 		List<String> categories = new ArrayList<>();
@@ -151,6 +186,11 @@ public class CalSyncMain {
 				}
 			}
 
+			// enforce our require-category boolean
+			if (sourceCal.isRequireCategory() && !hasCategory) {
+				continue;
+			}
+
 			StringBuilder sb = new StringBuilder();
 			String normalDescription = event.getDescription();
 			if (normalDescription != null) {
@@ -160,9 +200,8 @@ public class CalSyncMain {
 			String orgDescription = sb.toString();
 
 			// for each dest-cal which matches org or category, see if it has the event
-			for (Entry<SyncedCalendar, Map<String, Event>> entry : destCalEventMap.entrySet()) {
-				SyncedCalendar destCal = entry.getKey();
-				Map<String, Event> destEvents = entry.getValue();
+			for (SyncedCalendar destCal : destCals) {
+				Map<String, Event> destEvents = destCalEventMap.get(destCal);
 
 				String destOrg = destCal.getOrganization();
 				String destCat = destCal.getCategory();
