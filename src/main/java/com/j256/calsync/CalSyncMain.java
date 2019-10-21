@@ -73,6 +73,7 @@ public class CalSyncMain {
 
 		List<KeywordCategory> keywordCategories = keywordCategoryDao.queryForAll();
 		List<SyncedCalendar> syncedCalendars = syncedCalendarDao.queryForAll();
+		connectionSource.close();
 
 		Map<SyncedCalendar, Map<String, Event>> destCalEventMap = new HashMap<>();
 
@@ -94,7 +95,7 @@ public class CalSyncMain {
 			}
 			System.out.println("Processing calendar: " + syncedCal.getCalendarName());
 			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, syncedCal);
-			resolveSourceCalendar(readWriteCalendarService, keywordCategories, syncedCal, eventMap.values(),
+			syncSourceCalendar(readWriteCalendarService, keywordCategories, syncedCal, eventMap.values(),
 					destCalEventMap);
 			System.out.println("-------------------------");
 		}
@@ -113,7 +114,7 @@ public class CalSyncMain {
 		}
 	}
 
-	private void resolveSourceCalendar(Calendar readWriteService, List<KeywordCategory> keywordCategories,
+	private void syncSourceCalendar(Calendar readWriteService, List<KeywordCategory> keywordCategories,
 			SyncedCalendar sourceCal, Collection<Event> sourceEvents,
 			Map<SyncedCalendar, Map<String, Event>> destCalEventMap) throws IOException {
 
@@ -142,6 +143,7 @@ public class CalSyncMain {
 					// cut out the keyword itself out of the description
 					StringBuilder sb = new StringBuilder();
 					sb.append(description, 0, index);
+					// NOTE: we make assumptions that there is whitespace around this word already
 					sb.append(description, index + keyword.length(), description.length());
 					categories.add(keyCat.getCategory());
 					event.setDescription(sb.toString().trim());
@@ -166,15 +168,20 @@ public class CalSyncMain {
 				String destCat = destCal.getCategory();
 				// is it an organization roll-up calendar?
 				boolean match = false;
-				if (destOrg == null && destCat == null && (!sourceCal.isRequireCategory() || hasCategory)) {
-					// master roll-up but only if one of the calendar matches
-					match = true;
-				} else if (destOrg != null) {
-					if (destOrg.equals(sourceOrg)) {
-						// we know that the org must be null here because org/category for a dest-cal doesn't make sense
+				if (destOrg == null && destCat == null) {
+					// master roll-up but only if the calendar is requiring categories then we need to have one
+					if (!sourceCal.isRequireCategory() || hasCategory) {
 						match = true;
 					}
-				} else if (categories.contains(destCat)) {
+				} else if (destOrg != null) {
+					if (destOrg.equals(sourceOrg)) {
+						/*
+						 * we know that the destOrg must be non-null here because org/category for a dest-cal doesn't
+						 * make sense
+						 */
+						match = true;
+					}
+				} else if (destCat != null && categories.contains(destCat)) {
 					match = true;
 				}
 				if (!match) {
@@ -182,8 +189,8 @@ public class CalSyncMain {
 				}
 
 				/*
-				 * If our destination-org is not set then this is a roll-up cross organization calendar and display the
-				 * source org.
+				 * If our destination-org is not set then this is a roll-up, cross-organization calendar and we need to
+				 * append the source org to the description.
 				 */
 				if (destOrg == null) {
 					event.setDescription(orgDescription);
@@ -191,7 +198,10 @@ public class CalSyncMain {
 					event.setDescription(normalDescription);
 				}
 
-				// now remove the event from detination calendar list to see if it exists
+				/*
+				 * Now remove the event from destination calendar list to see if it exists which will leave the ones
+				 * that we need to remove later.
+				 */
 				Event destEvent = destEvents.remove(event.getId());
 				if (destEvent == null) {
 					destEvent = new Event();
@@ -200,7 +210,7 @@ public class CalSyncMain {
 							"Adding event '" + destEvent.getSummary() + "' to calendar: " + destCal.getCalendarName());
 					readWriteService.events().insert(destCal.getCalendarId(), destEvent).execute();
 				} else if (eventEquals(event, destEvent)) {
-					// no changes need to be made
+					// no changes need to be made to the event
 				} else {
 					// need to update this event
 					System.out.println(
@@ -208,13 +218,15 @@ public class CalSyncMain {
 					assignEventFields(destEvent, event);
 					readWriteService.events().update(destCal.getCalendarId(), destEvent.getId(), destEvent).execute();
 				}
+				// NOTE: deletes are done at the end outside of this method
 			}
 		}
 	}
 
 	private void assignEventFields(Event destEvent, Event sourceEvent) {
-		destEvent.setSummary(sourceEvent.getSummary());
+		// NOTE: id might be null if it is new
 		destEvent.setId(sourceEvent.getId());
+		destEvent.setSummary(sourceEvent.getSummary());
 		destEvent.setStart(sourceEvent.getStart());
 		destEvent.setEnd(sourceEvent.getEnd());
 		destEvent.setLocation(sourceEvent.getLocation());
@@ -223,6 +235,10 @@ public class CalSyncMain {
 	}
 
 	private boolean eventEquals(Event sourceEvent, Event destEvent) {
+		/*
+		 * NOTE: we don't compare id here because it is going to be assigned and different. Also we don't compare
+		 * htmlLink because it too will be assigned.
+		 */
 		return (Objects.equals(sourceEvent.getSummary(), destEvent.getSummary())
 				&& Objects.equals(sourceEvent.getStart(), destEvent.getStart())
 				&& Objects.equals(sourceEvent.getEnd(), destEvent.getEnd())

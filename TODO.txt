@@ -1,24 +1,17 @@
-- database of calendars that we are reading from
-	- how do we authenticate against each one of them?
 - read all future calendar entries (or maybe those after yesterday or something)
 	- we don't want to have old entries removed from their calendar be necessarily removed from central
 	- maybe have an archive calendar or something
-- hopefully the google cal entries will have a unique idea
 - central database that allows me to edit an entry:
 	- add a type do it
 	- add a location
 	- filter it
 	- add an attachment
 - pay attention to the public/private flag on the entry
-- have a keyword in the description:
-	- corresponds to a destination calendar
-	- gvpcal
-	- maybe make it a guest: gvp@...com
-- have a table of calendars
-	- calendars can have an assumed keyword (GVP)
 - look forward only X months (maybe a year?)
 
 ------------------------------------------------------------------------------------------------------------------
 
 - list all entries since the beginning of time (maybe start a month back or something)
 - how do we handle having a contact (the leader) and how to protect their personal information
+- maybe have explicit sync rules:
+	- this calendar goes to that one but only if a category is set but goes into this other calendar regardless
