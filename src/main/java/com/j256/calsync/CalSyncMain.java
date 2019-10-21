@@ -92,6 +92,10 @@ public class CalSyncMain {
 				System.err.println("Unknown source-cal id: " + syncPath.getSourceCalendar().getId());
 				continue;
 			}
+			if (!sourceCal.isSource()) {
+				System.err.println("SyncPath source-cal is not marked as source: " + sourceCal);
+				continue;
+			}
 			List<SyncedCalendar> destCals = sourceCalToDestCalMap.get(sourceCal);
 			if (destCals == null) {
 				destCals = new ArrayList<>();
@@ -100,6 +104,8 @@ public class CalSyncMain {
 			SyncedCalendar destCal = calIdMap.get(syncPath.getDestCalendar().getId());
 			if (destCal == null) {
 				System.err.println("Unknown dest-cal id: " + syncPath.getDestCalendar().getId());
+			} else if (destCal.isSource()) {
+				System.err.println("SyncPath dest-cal is marked as source: " + destCal);
 			} else {
 				destCals.add(destCal);
 			}
@@ -125,10 +131,11 @@ public class CalSyncMain {
 			}
 			List<SyncedCalendar> destCals = sourceCalToDestCalMap.get(sourceCal);
 			if (destCals == null || destCals.isEmpty()) {
-				System.out.println("No destination calendars for: " + sourceCal.getCalendarName());
+				System.out.println("No destination calendars for: " + sourceCal.getName());
 				continue;
 			}
-			System.out.println("Processing calendar: " + sourceCal.getCalendarName());
+			System.out.println("Processing calendar: " + sourceCal.getName());
+			// System.out.println(" destination calendars: " + destCals);
 			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, sourceCal);
 			syncSourceCalendar(readWriteCalendarService, keywordCategories, sourceCal, eventMap.values(), destCals,
 					destCalEventMap);
@@ -142,9 +149,8 @@ public class CalSyncMain {
 			Map<String, Event> destEvents = entry.getValue();
 
 			for (Event event : destEvents.values()) {
-				System.out.println(
-						"Removing event '" + event.getSummary() + "' from calendar: " + destCal.getCalendarName());
-				readWriteCalendarService.events().delete(destCal.getCalendarId(), event.getId()).execute();
+				System.out.println("Removing event '" + event.getSummary() + "' from calendar: " + destCal.getName());
+				readWriteCalendarService.events().delete(destCal.getGoogleId(), event.getId()).execute();
 			}
 		}
 	}
@@ -201,37 +207,20 @@ public class CalSyncMain {
 
 			// for each dest-cal which matches org or category, see if it has the event
 			for (SyncedCalendar destCal : destCals) {
+				// System.out.println(" Copying from '" + sourceCal + "' to destCal: " + destCal);
 				Map<String, Event> destEvents = destCalEventMap.get(destCal);
 
-				String destOrg = destCal.getOrganization();
 				String destCat = destCal.getCategory();
-				// is it an organization roll-up calendar?
-				boolean match = false;
-				if (destOrg == null && destCat == null) {
-					// master roll-up but only if the calendar is requiring categories then we need to have one
-					if (!sourceCal.isRequireCategory() || hasCategory) {
-						match = true;
-					}
-				} else if (destOrg != null) {
-					if (destOrg.equals(sourceOrg)) {
-						/*
-						 * we know that the destOrg must be non-null here because org/category for a dest-cal doesn't
-						 * make sense
-						 */
-						match = true;
-					}
-				} else if (destCat != null && categories.contains(destCat)) {
-					match = true;
-				}
-				if (!match) {
+				if (destCat != null && !categories.contains(destCat)) {
 					continue;
 				}
 
 				/*
-				 * If our destination-org is not set then this is a roll-up, cross-organization calendar and we need to
-				 * append the source org to the description.
+				 * If our destination-org is not set or is different from the source-calendar organization then we need
+				 * to append the source org to the description.
 				 */
-				if (destOrg == null) {
+				String destOrg = destCal.getOrganization();
+				if (destOrg == null || !destOrg.equals(sourceOrg)) {
 					event.setDescription(orgDescription);
 				} else {
 					event.setDescription(normalDescription);
@@ -245,17 +234,16 @@ public class CalSyncMain {
 				if (destEvent == null) {
 					destEvent = new Event();
 					assignEventFields(destEvent, event);
-					System.out.println(
-							"Adding event '" + destEvent.getSummary() + "' to calendar: " + destCal.getCalendarName());
-					readWriteService.events().insert(destCal.getCalendarId(), destEvent).execute();
+					System.out
+							.println("Adding event '" + destEvent.getSummary() + "' to calendar: " + destCal.getName());
+					readWriteService.events().insert(destCal.getGoogleId(), destEvent).execute();
 				} else if (eventEquals(event, destEvent)) {
 					// no changes need to be made to the event
 				} else {
 					// need to update this event
-					System.out.println(
-							"Updating event '" + event.getSummary() + "' in calendar: " + destCal.getCalendarName());
+					System.out.println("Updating event '" + event.getSummary() + "' in calendar: " + destCal.getName());
 					assignEventFields(destEvent, event);
-					readWriteService.events().update(destCal.getCalendarId(), destEvent.getId(), destEvent).execute();
+					readWriteService.events().update(destCal.getGoogleId(), destEvent.getId(), destEvent).execute();
 				}
 				// NOTE: deletes are done at the end outside of this method
 			}
@@ -295,7 +283,7 @@ public class CalSyncMain {
 					.list("primary")
 					.setPageToken(nextPageToken)
 					.setSingleEvents(true)
-					.setCalendarId(calendar.getCalendarId())
+					.setCalendarId(calendar.getGoogleId())
 					.execute();
 			List<Event> eventList = events.getItems();
 			for (Event event : eventList) {
@@ -303,7 +291,7 @@ public class CalSyncMain {
 			}
 			nextPageToken = events.getNextPageToken();
 		} while (nextPageToken != null);
-		System.out.println("Loaded " + eventMap.size() + " events from " + calendar.getCalendarName());
+		System.out.println("Loaded " + eventMap.size() + " events from " + calendar.getName());
 		return eventMap;
 	}
 }

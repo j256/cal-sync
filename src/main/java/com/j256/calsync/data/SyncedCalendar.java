@@ -12,9 +12,9 @@ public class SyncedCalendar {
 	@DatabaseField(generatedId = true)
 	private int id;
 	@DatabaseField(unique = true)
-	private String calendarId;
+	private String googleId;
 	@DatabaseField(unique = true)
-	private String calendarName;
+	private String name;
 	// type of the calendar if it is specific to a certain calendar group or null if misc or per-event type
 	@DatabaseField
 	private String category;
@@ -34,10 +34,10 @@ public class SyncedCalendar {
 		// for ormlite
 	}
 
-	public SyncedCalendar(String calendarId, String calendarName, String category, String organization,
-			boolean requireCategory, boolean source) {
-		this.calendarId = calendarId;
-		this.calendarName = calendarName;
+	public SyncedCalendar(String googleId, String name, String category, String organization, boolean requireCategory,
+			boolean source) {
+		this.googleId = googleId;
+		this.name = name;
 		this.category = category;
 		this.organization = organization;
 		this.requireCategory = requireCategory;
@@ -48,12 +48,12 @@ public class SyncedCalendar {
 		return id;
 	}
 
-	public String getCalendarId() {
-		return calendarId;
+	public String getGoogleId() {
+		return googleId;
 	}
 
-	public String getCalendarName() {
-		return calendarName;
+	public String getName() {
+		return name;
 	}
 
 	public String getCategory() {
@@ -74,7 +74,7 @@ public class SyncedCalendar {
 
 	@Override
 	public int hashCode() {
-		return calendarId.hashCode();
+		return googleId.hashCode();
 	}
 
 	@Override
@@ -82,11 +82,11 @@ public class SyncedCalendar {
 		if (obj == null || getClass() != obj.getClass()) {
 			return false;
 		}
-		return calendarId.equals(((SyncedCalendar) obj).calendarId);
+		return this.googleId.equals(((SyncedCalendar) obj).googleId);
 	}
 
 	@Override
 	public String toString() {
-		return "DestCal [calendarName=" + calendarName + "]";
+		return "SyncedCalendar [name=" + name + "]";
 	}
 }
