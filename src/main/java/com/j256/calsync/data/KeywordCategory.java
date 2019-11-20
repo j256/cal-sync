@@ -9,18 +9,18 @@ import com.j256.ormlite.table.DatabaseTable;
  * gun-violence event happens to include the words "food will be provided".
  */
 @DatabaseTable
-public class KeywordCategory {
+public class KeywordCategory extends BaseGeneratedIdEntity {
 
 	@DatabaseField
 	private String keyword;
-	@DatabaseField
-	private String category;
+	@DatabaseField(foreign = true)
+	private Category category;
 
 	public KeywordCategory() {
 		// for ormlite
 	}
 
-	public KeywordCategory(String keyword, String category) {
+	public KeywordCategory(String keyword, Category category) {
 		this.keyword = keyword;
 		this.category = category;
 	}
@@ -29,7 +29,7 @@ public class KeywordCategory {
 		return keyword;
 	}
 
-	public String getCategory() {
+	public Category getCategory() {
 		return category;
 	}
 }

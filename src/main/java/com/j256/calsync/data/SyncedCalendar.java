@@ -7,24 +7,23 @@ import com.j256.ormlite.table.DatabaseTable;
  * Calendar that we are reading events from.
  */
 @DatabaseTable
-public class SyncedCalendar {
+public class SyncedCalendar extends BaseGeneratedIdEntity {
 
-	@DatabaseField(generatedId = true)
-	private int id;
+	// google calendar-id from google.com calendar settings page
 	@DatabaseField(unique = true)
 	private String googleId;
 	@DatabaseField(unique = true)
 	private String name;
 	// type of the calendar if it is specific to a certain calendar group or null if misc or per-event type
-	@DatabaseField
-	private String category;
+	@DatabaseField(foreign = true)
+	private Category category;
 	// organization that if specified (and the category is null) will get all organization events
-	@DatabaseField
-	private String organization;
+	@DatabaseField(foreign = true)
+	private Organization organization;
 	// whether or not a category is required before the entry will be copied into another calendar
 	@DatabaseField
 	private boolean requireCategory;
-	// whether or not a category is required before the entry will be copied into another calendar
+	// whether this is a source calendar versus a destination calendar
 	@DatabaseField
 	private boolean source;
 
@@ -34,18 +33,14 @@ public class SyncedCalendar {
 		// for ormlite
 	}
 
-	public SyncedCalendar(String googleId, String name, String category, String organization, boolean requireCategory,
-			boolean source) {
+	public SyncedCalendar(String googleId, String name, Category category, Organization organization,
+			boolean requireCategory, boolean source) {
 		this.googleId = googleId;
 		this.name = name;
 		this.category = category;
 		this.organization = organization;
 		this.requireCategory = requireCategory;
 		this.source = source;
-	}
-
-	public int getId() {
-		return id;
 	}
 
 	public String getGoogleId() {
@@ -56,11 +51,11 @@ public class SyncedCalendar {
 		return name;
 	}
 
-	public String getCategory() {
+	public Category getCategory() {
 		return category;
 	}
 
-	public String getOrganization() {
+	public Organization getOrganization() {
 		return organization;
 	}
 
@@ -70,19 +65,6 @@ public class SyncedCalendar {
 
 	public boolean isSource() {
 		return source;
-	}
-
-	@Override
-	public int hashCode() {
-		return googleId.hashCode();
-	}
-
-	@Override
-	public boolean equals(Object obj) {
-		if (obj == null || getClass() != obj.getClass()) {
-			return false;
-		}
-		return this.googleId.equals(((SyncedCalendar) obj).googleId);
 	}
 
 	@Override

@@ -14,10 +14,10 @@ public class IcalEventTest {
 
 	@Test
 	public void testBasic() throws IOException {
-		String uid = "6kob21j7sjos3ml4g6bujul9vi@google.com";
+		String uid = "zipper@google.com";
 		String description = "\\n\\nGVPCal";
 		String summary = "Stuff happening";
-		String location = "Follen Church";
+		String location = "Big Church";
 		String filename = "Safari - Sep 6, 2019 at 13:53.pdf";
 		String icalLines = "BEGIN:VEVENT\n" //
 				+ "DTSTART:20191020T030000Z\n" //
@@ -27,7 +27,7 @@ public class IcalEventTest {
 				+ "LOCATION:" + location + "\n" //
 				+ "SUMMARY:" + summary + "\n" //
 				+ "ATTACH;FILENAME=\"" + filename + "\";FMTTYPE=application/pdf\n" //
-				+ " :https://drive.google.com/file/d/1i9Zi3LXx5AvhqWehLRvLgB9YkcIEvGps/view?usp\n" //
+				+ " :https://drive.google.com/file/d/123/view?usp\n" //
 				+ " =drive_web\n" //
 				+ "END:VEVENT\n";
 		try (BufferedReader reader = new BufferedReader(new StringReader(icalLines))) {
@@ -45,5 +45,4 @@ public class IcalEventTest {
 			assertEquals(filename, attachments.get(0).getFilename());
 		}
 	}
-
 }

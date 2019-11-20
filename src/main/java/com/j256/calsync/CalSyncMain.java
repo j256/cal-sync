@@ -7,10 +7,12 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
+import java.util.Set;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
@@ -23,27 +25,35 @@ import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.Events;
 import com.j256.calsync.dao.KeywordCategoryDao;
 import com.j256.calsync.dao.KeywordCategoryDaoImpl;
+import com.j256.calsync.dao.OrganizationDao;
+import com.j256.calsync.dao.OrganizationDaoImpl;
 import com.j256.calsync.dao.SyncPathDao;
 import com.j256.calsync.dao.SyncPathDaoImpl;
 import com.j256.calsync.dao.SyncedCalendarDao;
 import com.j256.calsync.dao.SyncedCalendarDaoImpl;
+import com.j256.calsync.data.Category;
 import com.j256.calsync.data.KeywordCategory;
+import com.j256.calsync.data.Organization;
 import com.j256.calsync.data.SyncPath;
 import com.j256.calsync.data.SyncedCalendar;
 import com.j256.ormlite.jdbc.JdbcConnectionSource;
 
+/**
+ * Main class.
+ * 
+ * @author graywatson
+ */
 public class CalSyncMain {
 
 	private static final String APPLICATION_NAME = "Lexington Calendar Sync";
+	private static final String SQL_URL = "jdbc:postgresql://localhost/cal";
+	private static final String SQL_USERNAME = "cal";
+	private static final String SQL_PASSWORD = "dates";
 
-	/**
-	 * Global instance of the scopes required by this quickstart. If modifying these scopes, delete your previously
-	 * saved tokens/ folder.
-	 */
 	private static final List<String> READ_ONLY_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR_READONLY);
 	private static final List<String> READ_WRITE_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR);
 
-	private static final String CREDENTIALS_FILE_PATH = "/Lexington Calendar Sync-56846a9d7f0d.json";
+	private static final String CREDENTIALS_FILE_PATH = "/Lexington_Calendar_Sync-56846a9d7f0d.json";
 
 	private static final JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
 
@@ -68,21 +78,26 @@ public class CalSyncMain {
 				.build();
 
 		// create our database objects
-		JdbcConnectionSource connectionSource =
-				new JdbcConnectionSource("jdbc:h2:file:/var/cal-sync/cal-sync.db;USER=cal;PASSWORD=syncer");
+		JdbcConnectionSource connectionSource = new JdbcConnectionSource(SQL_URL, SQL_USERNAME, SQL_PASSWORD);
 
 		KeywordCategoryDao keywordCategoryDao = new KeywordCategoryDaoImpl(connectionSource);
 		SyncedCalendarDao syncedCalendarDao = new SyncedCalendarDaoImpl(connectionSource);
 		SyncPathDao syncPathDao = new SyncPathDaoImpl(connectionSource);
+		OrganizationDao organizationDao = new OrganizationDaoImpl(connectionSource);
 
 		List<KeywordCategory> keywordCategories = keywordCategoryDao.queryForAll();
 		List<SyncedCalendar> syncedCalendars = syncedCalendarDao.queryForAll();
 		List<SyncPath> syncPaths = syncPathDao.queryForAll();
+		List<Organization> organizations = organizationDao.queryForAll();
 		connectionSource.close();
 
 		Map<Integer, SyncedCalendar> calIdMap = new HashMap<>();
 		for (SyncedCalendar syncedCalendar : syncedCalendars) {
 			calIdMap.put(syncedCalendar.getId(), syncedCalendar);
+		}
+		Map<Integer, Organization> orgIdMap = new HashMap<>();
+		for (Organization organization : organizations) {
+			orgIdMap.put(organization.getId(), organization);
 		}
 
 		Map<SyncedCalendar, List<SyncedCalendar>> sourceCalToDestCalMap = new HashMap<>();
@@ -125,20 +140,14 @@ public class CalSyncMain {
 		System.out.println("-------------------------------------------------------");
 
 		// open each source-cal calendar and sync it
-		for (SyncedCalendar sourceCal : syncedCalendars) {
-			if (!sourceCal.isSource()) {
-				continue;
-			}
-			List<SyncedCalendar> destCals = sourceCalToDestCalMap.get(sourceCal);
-			if (destCals == null || destCals.isEmpty()) {
-				System.out.println("No destination calendars for: " + sourceCal.getName());
-				continue;
-			}
+		for (Entry<SyncedCalendar, List<SyncedCalendar>> entry : sourceCalToDestCalMap.entrySet()) {
+			SyncedCalendar sourceCal = entry.getKey();
+			List<SyncedCalendar> destCals = entry.getValue();
 			System.out.println("Processing calendar: " + sourceCal.getName());
 			// System.out.println(" destination calendars: " + destCals);
 			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, sourceCal);
 			syncSourceCalendar(readWriteCalendarService, keywordCategories, sourceCal, eventMap.values(), destCals,
-					destCalEventMap);
+					destCalEventMap, orgIdMap);
 			System.out.println("-------------------------");
 		}
 		System.out.println("-------------------------------------------------------");
@@ -157,13 +166,24 @@ public class CalSyncMain {
 
 	private void syncSourceCalendar(Calendar readWriteService, List<KeywordCategory> keywordCategories,
 			SyncedCalendar sourceCal, Collection<Event> sourceEvents, List<SyncedCalendar> destCals,
-			Map<SyncedCalendar, Map<String, Event>> destCalEventMap) throws IOException {
+			Map<SyncedCalendar, Map<String, Event>> destCalEventMap, Map<Integer, Organization> orgIdMap)
+			throws IOException {
 
-		List<String> categories = new ArrayList<>();
+		Set<Category> categories = new HashSet<>();
 		for (Event event : sourceEvents) {
 			// check on event organization
-			String sourceOrg = sourceCal.getOrganization();
-			String description = event.getDescription().trim();
+			Organization sourceOrg = sourceCal.getOrganization();
+			int sourceOrgId = sourceOrg.getId();
+			sourceOrg = orgIdMap.get(sourceOrgId);
+			if (sourceOrg == null) {
+				System.err.println("Unknown org id: " + sourceOrgId + " in calendar: " + sourceCal.getName());
+				continue;
+			}
+
+			String description = event.getDescription();
+			if (description != null) {
+				description = description.trim();
+			}
 
 			// determine the event categories
 			categories.clear();
@@ -202,7 +222,7 @@ public class CalSyncMain {
 			if (normalDescription != null) {
 				sb.append(normalDescription).append("\n\n");
 			}
-			sb.append("From ").append(sourceCal.getOrganization()).append(" calendar.");
+			sb.append("From calendar: ").append(sourceOrg.getName()).append(".");
 			String orgDescription = sb.toString();
 
 			// for each dest-cal which matches org or category, see if it has the event
@@ -210,7 +230,7 @@ public class CalSyncMain {
 				// System.out.println(" Copying from '" + sourceCal + "' to destCal: " + destCal);
 				Map<String, Event> destEvents = destCalEventMap.get(destCal);
 
-				String destCat = destCal.getCategory();
+				Category destCat = destCal.getCategory();
 				if (destCat != null && !categories.contains(destCat)) {
 					continue;
 				}
@@ -219,7 +239,7 @@ public class CalSyncMain {
 				 * If our destination-org is not set or is different from the source-calendar organization then we need
 				 * to append the source org to the description.
 				 */
-				String destOrg = destCal.getOrganization();
+				Organization destOrg = destCal.getOrganization();
 				if (destOrg == null || !destOrg.equals(sourceOrg)) {
 					event.setDescription(orgDescription);
 				} else {
@@ -280,8 +300,11 @@ public class CalSyncMain {
 		String nextPageToken = null;
 		do {
 			Events events = calendarService.events()
+					// is this necessary?
 					.list("primary")
+					// TODO: need to test next-page-token
 					.setPageToken(nextPageToken)
+					// is this right?
 					.setSingleEvents(true)
 					.setCalendarId(calendar.getGoogleId())
 					.execute();
