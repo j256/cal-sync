@@ -46,23 +46,28 @@ import com.j256.ormlite.jdbc.JdbcConnectionSource;
 public class CalSyncMain {
 
 	private static final String APPLICATION_NAME = "Lexington Calendar Sync";
-	private static final String SQL_URL = "jdbc:postgresql://localhost/cal";
-	private static final String SQL_USERNAME = "cal";
-	private static final String SQL_PASSWORD = "dates";
 
 	private static final List<String> READ_ONLY_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR_READONLY);
 	private static final List<String> READ_WRITE_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR);
 
-	private static final String CREDENTIALS_FILE_PATH = "/Lexington_Calendar_Sync-56846a9d7f0d.json";
+	private static final String CREDENTIALS_FILE_PATH = "/Lexington_Calendar_Sync_Creds.json";
 
 	private static final JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
 
 	public static void main(String... args) throws Exception {
+		if (args.length != 3) {
+			System.err.println("Usage: java -jar XXX.jar sql-url username password");
+			System.exit(1);
+		}
+		String sqlUrl = args[0];
+		String sqlUsername = args[1];
+		String sqlPassword = args[2];
 		final NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
-		new CalSyncMain().doMain(httpTransport);
+		new CalSyncMain().doMain(httpTransport, sqlUrl, sqlUsername, sqlPassword);
 	}
 
-	private void doMain(NetHttpTransport httpTransport) throws IOException, SQLException {
+	private void doMain(NetHttpTransport httpTransport, String sqlUrl, String sqlUsername, String sqlPassword)
+			throws IOException, SQLException {
 
 		InputStream in = CalSyncMain.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
 		GoogleCredential readOnlyCredential = GoogleCredential.fromStream(in).createScoped(READ_ONLY_SCOPE);
@@ -78,7 +83,7 @@ public class CalSyncMain {
 				.build();
 
 		// create our database objects
-		JdbcConnectionSource connectionSource = new JdbcConnectionSource(SQL_URL, SQL_USERNAME, SQL_PASSWORD);
+		JdbcConnectionSource connectionSource = new JdbcConnectionSource(sqlUrl, sqlUsername, sqlPassword);
 
 		KeywordCategoryDao keywordCategoryDao = new KeywordCategoryDaoImpl(connectionSource);
 		SyncedCalendarDao syncedCalendarDao = new SyncedCalendarDaoImpl(connectionSource);
