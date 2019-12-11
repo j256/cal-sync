@@ -4,15 +4,13 @@ import com.j256.ormlite.field.DatabaseField;
 import com.j256.ormlite.table.DatabaseTable;
 
 /**
- * Keywords that appear in event descriptions that map to a category. Example: "gvpcal". Probably should be non-known
- * words. For example, we would not want the word "food" to always mean food-insecurity incase the description of a
- * gun-violence event happens to include the words "food will be provided".
+ * Hashtag prefixes that appear in event descriptions that map to a category. Example: "#guns".
  */
 @DatabaseTable
 public class KeywordCategory extends BaseGeneratedIdEntity {
 
 	@DatabaseField
-	private String keyword;
+	private String prefix;
 	@DatabaseField(foreign = true)
 	private Category category;
 
@@ -20,13 +18,13 @@ public class KeywordCategory extends BaseGeneratedIdEntity {
 		// for ormlite
 	}
 
-	public KeywordCategory(String keyword, Category category) {
-		this.keyword = keyword;
+	public KeywordCategory(String prefix, Category category) {
+		this.prefix = prefix;
 		this.category = category;
 	}
 
-	public String getKeyword() {
-		return keyword;
+	public String getPrefix() {
+		return prefix;
 	}
 
 	public Category getCategory() {
@@ -35,6 +33,6 @@ public class KeywordCategory extends BaseGeneratedIdEntity {
 
 	@Override
 	public String toString() {
-		return "KeywordCategory [keyword=" + keyword + ", cat=" + category + "]";
+		return "KeywordCategory [prefix=" + prefix + ", cat=" + category + "]";
 	}
 }

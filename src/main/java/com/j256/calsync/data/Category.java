@@ -11,17 +11,24 @@ public class Category extends BaseGeneratedIdEntity {
 
 	@DatabaseField
 	private String name;
+	@DatabaseField
+	private String description;
 
 	public Category() {
 		// for ormlite
 	}
 
-	public Category(String name) {
+	public Category(String name, String description) {
 		this.name = name;
+		this.description = description;
 	}
 
 	public String getName() {
 		return name;
+	}
+
+	public String getDescription() {
+		return description;
 	}
 
 	@Override
