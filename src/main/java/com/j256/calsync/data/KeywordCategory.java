@@ -32,4 +32,9 @@ public class KeywordCategory extends BaseGeneratedIdEntity {
 	public Category getCategory() {
 		return category;
 	}
+
+	@Override
+	public String toString() {
+		return "KeywordCategory [keyword=" + keyword + ", cat=" + category + "]";
+	}
 }

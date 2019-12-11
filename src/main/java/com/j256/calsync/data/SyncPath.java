@@ -41,4 +41,9 @@ public class SyncPath extends BaseGeneratedIdEntity {
 	public void setDestCalendar(SyncedCalendar destCalendar) {
 		this.destCalendar = destCalendar;
 	}
+
+	@Override
+	public String toString() {
+		return "SyncPath [src=" + sourceCalendar.getName() + ", dest=" + destCalendar.getName() + "]";
+	}
 }

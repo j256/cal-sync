@@ -23,4 +23,9 @@ public class Category extends BaseGeneratedIdEntity {
 	public String getName() {
 		return name;
 	}
+
+	@Override
+	public String toString() {
+		return "Category [name=" + name + "]";
+	}
 }

@@ -23,4 +23,9 @@ public class Organization extends BaseGeneratedIdEntity {
 	public String getName() {
 		return name;
 	}
+
+	@Override
+	public String toString() {
+		return "Organization [name=" + name + "]";
+	}
 }
