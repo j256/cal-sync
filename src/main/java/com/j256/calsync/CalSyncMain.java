@@ -201,8 +201,8 @@ public class CalSyncMain {
 			boolean hasCategory = false;
 			if (description != null) {
 				for (KeywordCategory keyCat : keywordCategories) {
-					String keyword = keyCat.getKeyword();
-					int index = description.indexOf(keyword);
+					String prefix = keyCat.getPrefix();
+					int index = description.indexOf(prefix);
 					if (index < 0) {
 						continue;
 					}
@@ -210,7 +210,7 @@ public class CalSyncMain {
 					StringBuilder sb = new StringBuilder();
 					sb.append(description, 0, index);
 					// NOTE: we make assumptions that there is whitespace around this word already
-					sb.append(description, index + keyword.length(), description.length());
+					sb.append(description, index + prefix.length(), description.length());
 					categories.add(keyCat.getCategory());
 					event.setDescription(sb.toString().trim());
 					hasCategory = true;
