@@ -23,6 +23,8 @@ import com.google.api.services.calendar.Calendar;
 import com.google.api.services.calendar.CalendarScopes;
 import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.Events;
+import com.j256.calsync.dao.CategoryDao;
+import com.j256.calsync.dao.CategoryDaoImpl;
 import com.j256.calsync.dao.KeywordCategoryDao;
 import com.j256.calsync.dao.KeywordCategoryDaoImpl;
 import com.j256.calsync.dao.OrganizationDao;
@@ -46,6 +48,7 @@ import com.j256.ormlite.jdbc.JdbcConnectionSource;
 public class CalSyncMain {
 
 	private static final String APPLICATION_NAME = "Lexington Calendar Sync";
+	private static final boolean CUT_KEYWORD_FROM_DESCRIPTION = false;
 
 	private static final List<String> READ_ONLY_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR_READONLY);
 	private static final List<String> READ_WRITE_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR);
@@ -89,11 +92,13 @@ public class CalSyncMain {
 		SyncedCalendarDao syncedCalendarDao = new SyncedCalendarDaoImpl(connectionSource);
 		SyncPathDao syncPathDao = new SyncPathDaoImpl(connectionSource);
 		OrganizationDao organizationDao = new OrganizationDaoImpl(connectionSource);
+		CategoryDao categoryDao = new CategoryDaoImpl(connectionSource);
 
 		List<KeywordCategory> keywordCategories = keywordCategoryDao.queryForAll();
 		List<SyncedCalendar> syncedCalendars = syncedCalendarDao.queryForAll();
 		List<SyncPath> syncPaths = syncPathDao.queryForAll();
 		List<Organization> organizations = organizationDao.queryForAll();
+		List<Category> categories = categoryDao.queryForAll();
 		connectionSource.close();
 
 		Map<Integer, SyncedCalendar> calIdMap = new HashMap<>();
@@ -103,6 +108,10 @@ public class CalSyncMain {
 		Map<Integer, Organization> orgIdMap = new HashMap<>();
 		for (Organization organization : organizations) {
 			orgIdMap.put(organization.getId(), organization);
+		}
+		Map<Integer, Category> categoryIdMap = new HashMap<>();
+		for (Category category : categories) {
+			categoryIdMap.put(category.getId(), category);
 		}
 
 		Map<SyncedCalendar, List<SyncedCalendar>> sourceCalToDestCalMap = new HashMap<>();
@@ -152,7 +161,7 @@ public class CalSyncMain {
 			// System.out.println(" destination calendars: " + destCals);
 			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, sourceCal);
 			syncSourceCalendar(readWriteCalendarService, keywordCategories, sourceCal, eventMap.values(), destCals,
-					destCalEventMap, orgIdMap);
+					destCalEventMap, orgIdMap, categoryIdMap);
 			System.out.println("-------------------------");
 		}
 		System.out.println("-------------------------------------------------------");
@@ -171,8 +180,8 @@ public class CalSyncMain {
 
 	private void syncSourceCalendar(Calendar readWriteService, List<KeywordCategory> keywordCategories,
 			SyncedCalendar sourceCal, Collection<Event> sourceEvents, List<SyncedCalendar> destCals,
-			Map<SyncedCalendar, Map<String, Event>> destCalEventMap, Map<Integer, Organization> orgIdMap)
-			throws IOException {
+			Map<SyncedCalendar, Map<String, Event>> destCalEventMap, Map<Integer, Organization> orgIdMap,
+			Map<Integer, Category> catIdMap) throws IOException {
 
 		Set<Category> categories = new HashSet<>();
 		for (Event event : sourceEvents) {
@@ -207,12 +216,22 @@ public class CalSyncMain {
 						continue;
 					}
 					// cut out the keyword itself out of the description
-					StringBuilder sb = new StringBuilder();
-					sb.append(description, 0, index);
-					// NOTE: we make assumptions that there is whitespace around this word already
-					sb.append(description, index + prefix.length(), description.length());
-					categories.add(keyCat.getCategory());
-					event.setDescription(sb.toString().trim());
+					if (CUT_KEYWORD_FROM_DESCRIPTION) {
+						StringBuilder sb = new StringBuilder();
+						sb.append(description, 0, index);
+						// find the next whitespace character so that we support #lbgt*
+						for (index += prefix.length(); index < description.length(); index++) {
+							if (!Character.isAlphabetic(description.charAt(index))) {
+								break;
+							}
+						}
+						// NOTE: we make assumptions that there is whitespace around this word already
+						if (index < description.length()) {
+							sb.append(description, index, description.length());
+						}
+						event.setDescription(sb.toString().trim());
+					}
+					categories.add(catIdMap.get(keyCat.getCategory().getId()));
 					hasCategory = true;
 				}
 			}
@@ -221,6 +240,8 @@ public class CalSyncMain {
 			if (sourceCal.isRequireCategory() && !hasCategory) {
 				continue;
 			}
+
+			System.out.println("Found category(s): " + categories);
 
 			StringBuilder sb = new StringBuilder();
 			String normalDescription = event.getDescription();
@@ -273,6 +294,7 @@ public class CalSyncMain {
 				// NOTE: deletes are done at the end outside of this method
 			}
 		}
+
 	}
 
 	private void assignEventFields(Event destEvent, Event sourceEvent) {
