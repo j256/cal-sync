@@ -19,9 +19,13 @@ import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
+import com.google.api.client.util.DateTime;
 import com.google.api.services.calendar.Calendar;
 import com.google.api.services.calendar.CalendarScopes;
 import com.google.api.services.calendar.model.Event;
+import com.google.api.services.calendar.model.Event.Source;
+import com.google.api.services.calendar.model.EventAttachment;
+import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.Events;
 import com.j256.calsync.dao.CategoryDao;
 import com.j256.calsync.dao.CategoryDaoImpl;
@@ -54,6 +58,8 @@ public class CalSyncMain {
 	private static final List<String> READ_WRITE_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR);
 
 	private static final String CREDENTIALS_FILE_PATH = "/Lexington_Calendar_Sync_Creds.json";
+
+	private static final long MAX_IN_FUTURE_MILLIS = 3 * 30 * 24 * 3600 * 1000L;
 
 	private static final JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
 
@@ -101,17 +107,26 @@ public class CalSyncMain {
 		List<Category> categories = categoryDao.queryForAll();
 		connectionSource.close();
 
+		Map<Integer, Category> categoryIdMap = new HashMap<>();
+		for (Category category : categories) {
+			categoryIdMap.put(category.getId(), category);
+		}
 		Map<Integer, SyncedCalendar> calIdMap = new HashMap<>();
 		for (SyncedCalendar syncedCalendar : syncedCalendars) {
+			if (syncedCalendar.getCategory() != null) {
+				Category category = categoryIdMap.get(syncedCalendar.getCategory().getId());
+				if (category == null) {
+					System.err.println("Unknown category-id: " + syncedCalendar.getCategory().getId() + " in cal "
+							+ syncedCalendar);
+				} else {
+					syncedCalendar.setCategory(category);
+				}
+			}
 			calIdMap.put(syncedCalendar.getId(), syncedCalendar);
 		}
 		Map<Integer, Organization> orgIdMap = new HashMap<>();
 		for (Organization organization : organizations) {
 			orgIdMap.put(organization.getId(), organization);
-		}
-		Map<Integer, Category> categoryIdMap = new HashMap<>();
-		for (Category category : categories) {
-			categoryIdMap.put(category.getId(), category);
 		}
 
 		Map<SyncedCalendar, List<SyncedCalendar>> sourceCalToDestCalMap = new HashMap<>();
@@ -184,7 +199,25 @@ public class CalSyncMain {
 			Map<Integer, Category> catIdMap) throws IOException {
 
 		Set<Category> categories = new HashSet<>();
+
+		long maxStartTimeMillis = System.currentTimeMillis() + MAX_IN_FUTURE_MILLIS;
+
 		for (Event event : sourceEvents) {
+
+			// skip events with no start time or too far in the future
+			EventDateTime startDateTme = event.getStart();
+			if (startDateTme == null) {
+				System.out.println("Skipping event with no start date-time: " + startDateTme);
+				continue;
+			} else if (startDateTme.getDateTime() == null) {
+				System.out.println("Skipping event with no start date-time date: " + startDateTme);
+				continue;
+			} else if (startDateTme.getDateTime().getValue() > maxStartTimeMillis) {
+				System.out.println("Skipping event with bad start time: " + startDateTme);
+				continue;
+			}
+			System.out.println("Got event with start time: " + startDateTme);
+
 			// check on event organization
 			Organization sourceOrg = sourceCal.getOrganization();
 			int sourceOrgId = sourceOrg.getId();
@@ -231,13 +264,21 @@ public class CalSyncMain {
 						}
 						event.setDescription(sb.toString().trim());
 					}
-					categories.add(catIdMap.get(keyCat.getCategory().getId()));
+					Category category = catIdMap.get(keyCat.getCategory().getId());
+					if (category == null) {
+						System.err.println(
+								"Unknown category id: " + keyCat.getCategory().getId() + " in event: " + event);
+					} else {
+						categories.add(category);
+						System.out.println("2 Found category(s): " + categories);
+					}
 					hasCategory = true;
 				}
 			}
 
 			// enforce our require-category boolean
 			if (sourceCal.isRequireCategory() && !hasCategory) {
+				System.out.println("Skipping event with no categories");
 				continue;
 			}
 
@@ -253,7 +294,7 @@ public class CalSyncMain {
 
 			// for each dest-cal which matches org or category, see if it has the event
 			for (SyncedCalendar destCal : destCals) {
-				// System.out.println(" Copying from '" + sourceCal + "' to destCal: " + destCal);
+				System.out.println(" Copying from '" + sourceCal + "' to destCal: " + destCal);
 				Map<String, Event> destEvents = destCalEventMap.get(destCal);
 
 				Category destCat = destCal.getCategory();
@@ -280,8 +321,8 @@ public class CalSyncMain {
 				if (destEvent == null) {
 					destEvent = new Event();
 					assignEventFields(destEvent, event);
-					System.out
-							.println("Adding event '" + destEvent.getSummary() + "' to calendar: " + destCal.getName());
+					System.out.println("Adding event '" + destEvent.getSummary() + "' (id " + destEvent.getId()
+							+ ") to calendar: " + destCal.getName());
 					readWriteService.events().insert(destCal.getGoogleId(), destEvent).execute();
 				} else if (eventEquals(event, destEvent)) {
 					// no changes need to be made to the event
@@ -298,14 +339,18 @@ public class CalSyncMain {
 	}
 
 	private void assignEventFields(Event destEvent, Event sourceEvent) {
-		// NOTE: id might be null if it is new
-		destEvent.setId(sourceEvent.getId());
+		// NOTE: id is encoded into the Source below
 		destEvent.setSummary(sourceEvent.getSummary());
 		destEvent.setStart(sourceEvent.getStart());
 		destEvent.setEnd(sourceEvent.getEnd());
 		destEvent.setLocation(sourceEvent.getLocation());
 		destEvent.setDescription(sourceEvent.getDescription());
 		destEvent.setAttachments(sourceEvent.getAttachments());
+		destEvent.setRecurrence(sourceEvent.getRecurrence());
+		Source source = new Source();
+		source.setTitle(sourceEvent.getId());
+		source.setUrl("http://foo.com/");
+		destEvent.setSource(source);
 	}
 
 	private boolean eventEquals(Event sourceEvent, Event destEvent) {
@@ -318,26 +363,65 @@ public class CalSyncMain {
 				&& Objects.equals(sourceEvent.getEnd(), destEvent.getEnd())
 				&& Objects.equals(sourceEvent.getLocation(), destEvent.getLocation())
 				&& Objects.equals(sourceEvent.getDescription(), destEvent.getDescription())
-				&& Objects.equals(sourceEvent.getAttachments(), destEvent.getAttachments()));
+				&& Objects.equals(sourceEvent.getRecurrence(), destEvent.getRecurrence())
+				&& attachmentsEquals(sourceEvent, destEvent));
+	}
+
+	private boolean attachmentsEquals(Event sourceEvent, Event destEvent) {
+		// we have to do the attachments specifically
+		List<EventAttachment> sourceAttachments = sourceEvent.getAttachments();
+		List<EventAttachment> destAttachments = destEvent.getAttachments();
+		if (sourceAttachments == null) {
+			return (destAttachments == null);
+		} else if (destAttachments == null) {
+			System.out.println("Dest attachments should not be null");
+			return false;
+		} else if (sourceAttachments.size() != destAttachments.size()) {
+			System.out.println("Dest attachments size wrong");
+			return false;
+		}
+
+		// test each attachment in turn
+		for (int i = 0; i < sourceAttachments.size(); i++) {
+			EventAttachment sourceAttachment = sourceAttachments.get(i);
+			EventAttachment destAttachment = destAttachments.get(i);
+			if (!(Objects.equals(sourceAttachment.getFileUrl(), destAttachment.getFileUrl())
+					&& Objects.equals(sourceAttachment.getIconLink(), destAttachment.getIconLink())
+					&& Objects.equals(sourceAttachment.getMimeType(), destAttachment.getMimeType())
+					&& Objects.equals(sourceAttachment.getTitle(), destAttachment.getTitle()))) {
+				System.out.println("Attachment " + sourceAttachment + " != " + destAttachment);
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	private Map<String, Event> loadCalendarEntries(Calendar calendarService, SyncedCalendar calendar)
 			throws IOException {
 		Map<String, Event> eventMap = new HashMap<>();
 		String nextPageToken = null;
+		long maxTimeMillis = System.currentTimeMillis() + MAX_IN_FUTURE_MILLIS;
 		do {
 			Events events = calendarService.events()
 					// is this necessary?
 					.list("primary")
 					// TODO: need to test next-page-token
 					.setPageToken(nextPageToken)
+					// set our max time
+					.setTimeMax(new DateTime(maxTimeMillis))
 					// is this right?
-					.setSingleEvents(true)
+					.setSingleEvents(false)
 					.setCalendarId(calendar.getGoogleId())
 					.execute();
 			List<Event> eventList = events.getItems();
 			for (Event event : eventList) {
-				eventMap.put(event.getId(), event);
+				Source source = event.getSource();
+				if (source == null) {
+					eventMap.putIfAbsent(event.getId(), event);
+				} else {
+					eventMap.putIfAbsent(source.getTitle(), event);
+				}
 			}
 			nextPageToken = events.getNextPageToken();
 		} while (nextPageToken != null);
