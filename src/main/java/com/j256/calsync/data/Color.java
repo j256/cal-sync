@@ -4,21 +4,19 @@ import com.j256.ormlite.field.DatabaseField;
 import com.j256.ormlite.table.DatabaseTable;
 
 /**
- * Organization for calendars.
+ * Category for calendars.
  */
 @DatabaseTable
-public class Organization extends BaseGeneratedIdEntity {
+public class Color extends BaseGeneratedIdEntity {
 
 	@DatabaseField
 	private String name;
-	@DatabaseField(foreign = true)
-	private Color color;
 
-	public Organization() {
+	public Color() {
 		// for ormlite
 	}
 
-	public Organization(String name) {
+	public Color(String name) {
 		this.name = name;
 	}
 
@@ -26,12 +24,8 @@ public class Organization extends BaseGeneratedIdEntity {
 		return name;
 	}
 
-	public Color getColor() {
-		return color;
-	}
-
 	@Override
 	public String toString() {
-		return "Organization [name=" + name + "]";
+		return "Color [name=" + name + "]";
 	}
 }

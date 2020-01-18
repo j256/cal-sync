@@ -2,7 +2,6 @@ package com.j256.calsync;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -59,6 +58,7 @@ public class CalSyncMain {
 
 	private static final String CREDENTIALS_FILE_PATH = "/Lexington_Calendar_Sync_Creds.json";
 
+	private static final long MAX_IN_PAST_MILLIS = 3 * 30 * 24 * 3600 * 1000L;
 	private static final long MAX_IN_FUTURE_MILLIS = 3 * 30 * 24 * 3600 * 1000L;
 
 	private static final JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
@@ -71,12 +71,12 @@ public class CalSyncMain {
 		String sqlUrl = args[0];
 		String sqlUsername = args[1];
 		String sqlPassword = args[2];
-		final NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
-		new CalSyncMain().doMain(httpTransport, sqlUrl, sqlUsername, sqlPassword);
+		new CalSyncMain().doMain(sqlUrl, sqlUsername, sqlPassword);
 	}
 
-	private void doMain(NetHttpTransport httpTransport, String sqlUrl, String sqlUsername, String sqlPassword)
-			throws IOException, SQLException {
+	private void doMain(String sqlUrl, String sqlUsername, String sqlPassword) throws Exception {
+
+		final NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 
 		InputStream in = CalSyncMain.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
 		GoogleCredential readOnlyCredential = GoogleCredential.fromStream(in).createScoped(READ_ONLY_SCOPE);
@@ -207,16 +207,16 @@ public class CalSyncMain {
 			// skip events with no start time or too far in the future
 			EventDateTime startDateTme = event.getStart();
 			if (startDateTme == null) {
-				System.out.println("Skipping event with no start date-time: " + startDateTme);
+				// System.out.println("Skipping event with no start date-time");
 				continue;
 			} else if (startDateTme.getDateTime() == null) {
-				System.out.println("Skipping event with no start date-time date: " + startDateTme);
+				// System.out.println("Skipping event with no start date-time date: " + startDateTme);
 				continue;
 			} else if (startDateTme.getDateTime().getValue() > maxStartTimeMillis) {
 				System.out.println("Skipping event with bad start time: " + startDateTme);
 				continue;
 			}
-			System.out.println("Got event with start time: " + startDateTme);
+			// System.out.println("Got event with start time: " + startDateTme);
 
 			// check on event organization
 			Organization sourceOrg = sourceCal.getOrganization();
@@ -270,7 +270,6 @@ public class CalSyncMain {
 								"Unknown category id: " + keyCat.getCategory().getId() + " in event: " + event);
 					} else {
 						categories.add(category);
-						System.out.println("2 Found category(s): " + categories);
 					}
 					hasCategory = true;
 				}
@@ -278,11 +277,11 @@ public class CalSyncMain {
 
 			// enforce our require-category boolean
 			if (sourceCal.isRequireCategory() && !hasCategory) {
-				System.out.println("Skipping event with no categories");
+				// System.out.println("Skipping event with no categories");
 				continue;
 			}
 
-			System.out.println("Found category(s): " + categories);
+			System.out.println("Event " + event.getSummary() + " found category(s): " + categories);
 
 			StringBuilder sb = new StringBuilder();
 			String normalDescription = event.getDescription();
@@ -294,7 +293,6 @@ public class CalSyncMain {
 
 			// for each dest-cal which matches org or category, see if it has the event
 			for (SyncedCalendar destCal : destCals) {
-				System.out.println(" Copying from '" + sourceCal + "' to destCal: " + destCal);
 				Map<String, Event> destEvents = destCalEventMap.get(destCal);
 
 				Category destCat = destCal.getCategory();
@@ -311,6 +309,9 @@ public class CalSyncMain {
 					event.setDescription(orgDescription);
 				} else {
 					event.setDescription(normalDescription);
+				}
+				if (sourceOrg.getColor() != null) {
+					event.setColorId(Integer.toString(sourceOrg.getColor().getId()));
 				}
 
 				/*
@@ -335,7 +336,6 @@ public class CalSyncMain {
 				// NOTE: deletes are done at the end outside of this method
 			}
 		}
-
 	}
 
 	private void assignEventFields(Event destEvent, Event sourceEvent) {
@@ -347,9 +347,11 @@ public class CalSyncMain {
 		destEvent.setDescription(sourceEvent.getDescription());
 		destEvent.setAttachments(sourceEvent.getAttachments());
 		destEvent.setRecurrence(sourceEvent.getRecurrence());
+		destEvent.setColorId(sourceEvent.getColorId());
 		Source source = new Source();
 		source.setTitle(sourceEvent.getId());
-		source.setUrl("http://foo.com/");
+		// this source URL is required but unused I believe
+		source.setUrl("http://j256.com/");
 		destEvent.setSource(source);
 	}
 
@@ -358,13 +360,39 @@ public class CalSyncMain {
 		 * NOTE: we don't compare id here because it is going to be assigned and different. Also we don't compare
 		 * htmlLink because it too will be assigned.
 		 */
-		return (Objects.equals(sourceEvent.getSummary(), destEvent.getSummary())
-				&& Objects.equals(sourceEvent.getStart(), destEvent.getStart())
-				&& Objects.equals(sourceEvent.getEnd(), destEvent.getEnd())
-				&& Objects.equals(sourceEvent.getLocation(), destEvent.getLocation())
-				&& Objects.equals(sourceEvent.getDescription(), destEvent.getDescription())
-				&& Objects.equals(sourceEvent.getRecurrence(), destEvent.getRecurrence())
-				&& attachmentsEquals(sourceEvent, destEvent));
+		if (!Objects.equals(sourceEvent.getSummary(), destEvent.getSummary())) {
+			System.out.println("  Summary different");
+			return false;
+		}
+		if (!Objects.equals(sourceEvent.getStart(), destEvent.getStart())) {
+			System.out.println("  Time-start different: " + sourceEvent.getStart() + " vs " + destEvent.getStart());
+			return false;
+		}
+		if (!Objects.equals(sourceEvent.getEnd(), destEvent.getEnd())) {
+			System.out.println("  Time-End different: " + sourceEvent.getEnd() + " vs " + destEvent.getEnd());
+			return false;
+		}
+		if (!Objects.equals(sourceEvent.getLocation(), destEvent.getLocation())) {
+			System.out.println("  Location different");
+			return false;
+		}
+		if (!Objects.equals(sourceEvent.getDescription(), destEvent.getDescription())) {
+			System.out.println("  Description different");
+			return false;
+		}
+		if (!Objects.equals(sourceEvent.getRecurrence(), destEvent.getRecurrence())) {
+			System.out.println("  Recurrence different");
+			return false;
+		}
+		if (!Objects.equals(sourceEvent.getColorId(), destEvent.getColorId())) {
+			System.out.println("  Color different: " + sourceEvent.getColorId() + " vs " + destEvent.getColorId());
+			return false;
+		}
+		if (!attachmentsEquals(sourceEvent, destEvent)) {
+			System.out.println("  Attachments different");
+			return false;
+		}
+		return true;
 	}
 
 	private boolean attachmentsEquals(Event sourceEvent, Event destEvent) {
@@ -372,12 +400,17 @@ public class CalSyncMain {
 		List<EventAttachment> sourceAttachments = sourceEvent.getAttachments();
 		List<EventAttachment> destAttachments = destEvent.getAttachments();
 		if (sourceAttachments == null) {
-			return (destAttachments == null);
+			if (destAttachments == null) {
+				return true;
+			} else {
+				System.out.println("  Dest attachments are not null, need to be cleared");
+				return false;
+			}
 		} else if (destAttachments == null) {
-			System.out.println("Dest attachments should not be null");
+			System.out.println("  Dest attachments should not be null, attachments need to be added");
 			return false;
 		} else if (sourceAttachments.size() != destAttachments.size()) {
-			System.out.println("Dest attachments size wrong");
+			System.out.println("  Dest attachments size wrong");
 			return false;
 		}
 
@@ -388,8 +421,9 @@ public class CalSyncMain {
 			if (!(Objects.equals(sourceAttachment.getFileUrl(), destAttachment.getFileUrl())
 					&& Objects.equals(sourceAttachment.getIconLink(), destAttachment.getIconLink())
 					&& Objects.equals(sourceAttachment.getMimeType(), destAttachment.getMimeType())
-					&& Objects.equals(sourceAttachment.getTitle(), destAttachment.getTitle()))) {
-				System.out.println("Attachment " + sourceAttachment + " != " + destAttachment);
+					&& Objects.equals(sourceAttachment.getTitle(), destAttachment.getTitle())
+					&& Objects.equals(sourceAttachment.getFileId(), destAttachment.getFileId()))) {
+				System.out.println("  Attachment " + sourceAttachment + " != " + destAttachment);
 				return false;
 			}
 		}
@@ -401,15 +435,18 @@ public class CalSyncMain {
 			throws IOException {
 		Map<String, Event> eventMap = new HashMap<>();
 		String nextPageToken = null;
-		long maxTimeMillis = System.currentTimeMillis() + MAX_IN_FUTURE_MILLIS;
+		DateTime minDateTime = new DateTime(System.currentTimeMillis() - MAX_IN_PAST_MILLIS);
+		DateTime maxDateTime = new DateTime(System.currentTimeMillis() + MAX_IN_FUTURE_MILLIS);
 		do {
 			Events events = calendarService.events()
 					// is this necessary?
 					.list("primary")
 					// TODO: need to test next-page-token
 					.setPageToken(nextPageToken)
+					// set our min time
+					.setTimeMin(minDateTime)
 					// set our max time
-					.setTimeMax(new DateTime(maxTimeMillis))
+					.setTimeMax(maxDateTime)
 					// is this right?
 					.setSingleEvents(false)
 					.setCalendarId(calendar.getGoogleId())
@@ -421,6 +458,9 @@ public class CalSyncMain {
 					eventMap.putIfAbsent(event.getId(), event);
 				} else {
 					eventMap.putIfAbsent(source.getTitle(), event);
+				}
+				if (event.getColorId() != null) {
+					System.out.println("Event " + event.getSummary() + " has color " + event.getColorId());
 				}
 			}
 			nextPageToken = events.getNextPageToken();
