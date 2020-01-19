@@ -24,7 +24,7 @@ import com.google.api.client.util.DateTime;
 import com.google.api.services.calendar.Calendar;
 import com.google.api.services.calendar.CalendarScopes;
 import com.google.api.services.calendar.model.Event;
-import com.google.api.services.calendar.model.Event.Source;
+import com.google.api.services.calendar.model.Event.ExtendedProperties;
 import com.google.api.services.calendar.model.EventAttachment;
 import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.Events;
@@ -59,7 +59,7 @@ public class CalSyncMain {
 	private static final List<String> READ_WRITE_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR);
 
 	private static final String CREDENTIALS_FILE_PATH = "/Lexington_Calendar_Sync_Creds.json";
-	private static final String EVENT_SOURCE_TITLE_PREFIX = "_calsync_: ";
+	private static final String SOURCE_ID_PROPERTY_NAME = "calsync-source-id";
 
 	private static final long MAX_IN_PAST_MILLIS = Period.days(90).toStandardDuration().getMillis();
 	private static final long MAX_IN_FUTURE_MILLIS = Period.days(90).toStandardDuration().getMillis();
@@ -358,11 +358,10 @@ public class CalSyncMain {
 		destEvent.setAttachments(sourceEvent.getAttachments());
 		destEvent.setRecurrence(sourceEvent.getRecurrence());
 		destEvent.setColorId(sourceEvent.getColorId());
-		Source source = new Source();
-		source.setTitle(EVENT_SOURCE_TITLE_PREFIX + sourceEvent.getId());
-		// this source URL is required but unused I believe
-		source.setUrl("http://j256.com/");
-		destEvent.setSource(source);
+		// we store the id of the source-event as an "extended property" so we can find it an update it later
+		ExtendedProperties extendedProperties = new ExtendedProperties();
+		extendedProperties.setPrivate(Collections.singletonMap(SOURCE_ID_PROPERTY_NAME, sourceEvent.getId()));
+		destEvent.setExtendedProperties(extendedProperties);
 	}
 
 	private boolean eventEquals(Event sourceEvent, Event destEvent) {
@@ -473,13 +472,17 @@ public class CalSyncMain {
 					.execute();
 			List<Event> eventList = events.getItems();
 			for (Event event : eventList) {
-				Source source = event.getSource();
-				if (source == null || source.getTitle() == null
-						|| !source.getTitle().startsWith(EVENT_SOURCE_TITLE_PREFIX)) {
+				ExtendedProperties extendedProperties = event.getExtendedProperties();
+				if (extendedProperties == null) {
+					eventMap.putIfAbsent(event.getId(), event);
+					continue;
+				}
+				// we store the id of the source-event as an "extended property" so we can find it an update it later
+				Map<String, String> privateMap = extendedProperties.getPrivate();
+				if (privateMap == null || !privateMap.containsKey(SOURCE_ID_PROPERTY_NAME)) {
 					eventMap.putIfAbsent(event.getId(), event);
 				} else {
-					// if we have defined a source then the _title_ is the source that we've set
-					eventMap.putIfAbsent(source.getTitle().substring(EVENT_SOURCE_TITLE_PREFIX.length()), event);
+					eventMap.putIfAbsent(String.valueOf(privateMap.get(SOURCE_ID_PROPERTY_NAME)), event);
 				}
 				if (event.getColorId() != null) {
 					System.out.println("Event " + event.getSummary() + " has color " + event.getColorId());
