@@ -13,6 +13,8 @@ import java.util.Map.Entry;
 import java.util.Objects;
 import java.util.Set;
 
+import org.joda.time.Period;
+
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.javanet.NetHttpTransport;
@@ -57,9 +59,10 @@ public class CalSyncMain {
 	private static final List<String> READ_WRITE_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR);
 
 	private static final String CREDENTIALS_FILE_PATH = "/Lexington_Calendar_Sync_Creds.json";
+	private static final String EVENT_SOURCE_TITLE_PREFIX = "_calsync_: ";
 
-	private static final long MAX_IN_PAST_MILLIS = 3 * 30 * 24 * 3600 * 1000L;
-	private static final long MAX_IN_FUTURE_MILLIS = 3 * 30 * 24 * 3600 * 1000L;
+	private static final long MAX_IN_PAST_MILLIS = Period.days(90).toStandardDuration().getMillis();
+	private static final long MAX_IN_FUTURE_MILLIS = Period.days(90).toStandardDuration().getMillis();
 
 	private static final JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
 
@@ -315,8 +318,9 @@ public class CalSyncMain {
 				}
 
 				/*
-				 * Now remove the event from destination calendar list to see if it exists which will leave the ones
-				 * that we need to remove later.
+				 * Now remove the event from destination calendar list. If it doesn't exist then we need to add it. If
+				 * it does exist then we may need to update it. The ones that are left in the map need to be removed at
+				 * the end.
 				 */
 				Event destEvent = destEvents.remove(event.getId());
 				if (destEvent == null) {
@@ -324,14 +328,20 @@ public class CalSyncMain {
 					assignEventFields(destEvent, event);
 					System.out.println("Adding event '" + destEvent.getSummary() + "' (id " + destEvent.getId()
 							+ ") to calendar: " + destCal.getName());
-					readWriteService.events().insert(destCal.getGoogleId(), destEvent).execute();
+					readWriteService.events()
+							.insert(destCal.getGoogleId(), destEvent)
+							.setSupportsAttachments(true)
+							.execute();
 				} else if (eventEquals(event, destEvent)) {
 					// no changes need to be made to the event
 				} else {
 					// need to update this event
 					System.out.println("Updating event '" + event.getSummary() + "' in calendar: " + destCal.getName());
 					assignEventFields(destEvent, event);
-					readWriteService.events().update(destCal.getGoogleId(), destEvent.getId(), destEvent).execute();
+					readWriteService.events()
+							.update(destCal.getGoogleId(), destEvent.getId(), destEvent)
+							.setSupportsAttachments(true)
+							.execute();
 				}
 				// NOTE: deletes are done at the end outside of this method
 			}
@@ -349,7 +359,7 @@ public class CalSyncMain {
 		destEvent.setRecurrence(sourceEvent.getRecurrence());
 		destEvent.setColorId(sourceEvent.getColorId());
 		Source source = new Source();
-		source.setTitle(sourceEvent.getId());
+		source.setTitle(EVENT_SOURCE_TITLE_PREFIX + sourceEvent.getId());
 		// this source URL is required but unused I believe
 		source.setUrl("http://j256.com/");
 		destEvent.setSource(source);
@@ -418,12 +428,24 @@ public class CalSyncMain {
 		for (int i = 0; i < sourceAttachments.size(); i++) {
 			EventAttachment sourceAttachment = sourceAttachments.get(i);
 			EventAttachment destAttachment = destAttachments.get(i);
-			if (!(Objects.equals(sourceAttachment.getFileUrl(), destAttachment.getFileUrl())
-					&& Objects.equals(sourceAttachment.getIconLink(), destAttachment.getIconLink())
-					&& Objects.equals(sourceAttachment.getMimeType(), destAttachment.getMimeType())
-					&& Objects.equals(sourceAttachment.getTitle(), destAttachment.getTitle())
-					&& Objects.equals(sourceAttachment.getFileId(), destAttachment.getFileId()))) {
-				System.out.println("  Attachment " + sourceAttachment + " != " + destAttachment);
+			if (!Objects.equals(sourceAttachment.getFileUrl(), destAttachment.getFileUrl())) {
+				System.out.println("  Attachment file-url different: " + sourceAttachment + " != " + destAttachment);
+				return false;
+			}
+			if (!Objects.equals(sourceAttachment.getIconLink(), destAttachment.getIconLink())) {
+				System.out.println("  Attachment icon-link different: " + sourceAttachment + " != " + destAttachment);
+				return false;
+			}
+			if (!Objects.equals(sourceAttachment.getMimeType(), destAttachment.getMimeType())) {
+				System.out.println("  Attachment mime-type different: " + sourceAttachment + " != " + destAttachment);
+				return false;
+			}
+			if (!Objects.equals(sourceAttachment.getTitle(), destAttachment.getTitle())) {
+				System.out.println("  Attachment title different: " + sourceAttachment + " != " + destAttachment);
+				return false;
+			}
+			if (!Objects.equals(sourceAttachment.getFileId(), destAttachment.getFileId())) {
+				System.out.println("  Attachment file-id different: " + sourceAttachment + " != " + destAttachment);
 				return false;
 			}
 		}
@@ -439,25 +461,25 @@ public class CalSyncMain {
 		DateTime maxDateTime = new DateTime(System.currentTimeMillis() + MAX_IN_FUTURE_MILLIS);
 		do {
 			Events events = calendarService.events()
-					// is this necessary?
 					.list("primary")
-					// TODO: need to test next-page-token
+					// could be null or could be to continue large request
 					.setPageToken(nextPageToken)
-					// set our min time
+					// set our min/max times to limit the query
 					.setTimeMin(minDateTime)
-					// set our max time
 					.setTimeMax(maxDateTime)
-					// is this right?
+					// tried false here but it returns recurring events as multiples with the same id
 					.setSingleEvents(false)
 					.setCalendarId(calendar.getGoogleId())
 					.execute();
 			List<Event> eventList = events.getItems();
 			for (Event event : eventList) {
 				Source source = event.getSource();
-				if (source == null) {
+				if (source == null || source.getTitle() == null
+						|| !source.getTitle().startsWith(EVENT_SOURCE_TITLE_PREFIX)) {
 					eventMap.putIfAbsent(event.getId(), event);
 				} else {
-					eventMap.putIfAbsent(source.getTitle(), event);
+					// if we have defined a source then the _title_ is the source that we've set
+					eventMap.putIfAbsent(source.getTitle().substring(EVENT_SOURCE_TITLE_PREFIX.length()), event);
 				}
 				if (event.getColorId() != null) {
 					System.out.println("Event " + event.getSummary() + " has color " + event.getColorId());
@@ -465,7 +487,7 @@ public class CalSyncMain {
 			}
 			nextPageToken = events.getNextPageToken();
 		} while (nextPageToken != null);
-		System.out.println("Loaded " + eventMap.size() + " events from " + calendar.getName());
+		System.out.println("Loaded " + eventMap.size() + " events from calendar " + calendar.getName());
 		return eventMap;
 	}
 }
