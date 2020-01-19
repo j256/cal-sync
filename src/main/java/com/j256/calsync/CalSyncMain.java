@@ -28,12 +28,8 @@ import com.google.api.services.calendar.model.Event.ExtendedProperties;
 import com.google.api.services.calendar.model.EventAttachment;
 import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.Events;
-import com.j256.calsync.dao.CategoryDao;
-import com.j256.calsync.dao.CategoryDaoImpl;
 import com.j256.calsync.dao.KeywordCategoryDao;
 import com.j256.calsync.dao.KeywordCategoryDaoImpl;
-import com.j256.calsync.dao.OrganizationDao;
-import com.j256.calsync.dao.OrganizationDaoImpl;
 import com.j256.calsync.dao.SyncPathDao;
 import com.j256.calsync.dao.SyncPathDaoImpl;
 import com.j256.calsync.dao.SyncedCalendarDao;
@@ -100,36 +96,15 @@ public class CalSyncMain {
 		KeywordCategoryDao keywordCategoryDao = new KeywordCategoryDaoImpl(connectionSource);
 		SyncedCalendarDao syncedCalendarDao = new SyncedCalendarDaoImpl(connectionSource);
 		SyncPathDao syncPathDao = new SyncPathDaoImpl(connectionSource);
-		OrganizationDao organizationDao = new OrganizationDaoImpl(connectionSource);
-		CategoryDao categoryDao = new CategoryDaoImpl(connectionSource);
 
-		List<KeywordCategory> keywordCategories = keywordCategoryDao.queryForAll();
 		List<SyncedCalendar> syncedCalendars = syncedCalendarDao.queryForAll();
 		List<SyncPath> syncPaths = syncPathDao.queryForAll();
-		List<Organization> organizations = organizationDao.queryForAll();
-		List<Category> categories = categoryDao.queryForAll();
+		List<KeywordCategory> keywordCategories = keywordCategoryDao.queryForAll();
 		connectionSource.close();
 
-		Map<Integer, Category> categoryIdMap = new HashMap<>();
-		for (Category category : categories) {
-			categoryIdMap.put(category.getId(), category);
-		}
 		Map<Integer, SyncedCalendar> calIdMap = new HashMap<>();
 		for (SyncedCalendar syncedCalendar : syncedCalendars) {
-			if (syncedCalendar.getCategory() != null) {
-				Category category = categoryIdMap.get(syncedCalendar.getCategory().getId());
-				if (category == null) {
-					System.err.println("Unknown category-id: " + syncedCalendar.getCategory().getId() + " in cal "
-							+ syncedCalendar);
-				} else {
-					syncedCalendar.setCategory(category);
-				}
-			}
 			calIdMap.put(syncedCalendar.getId(), syncedCalendar);
-		}
-		Map<Integer, Organization> orgIdMap = new HashMap<>();
-		for (Organization organization : organizations) {
-			orgIdMap.put(organization.getId(), organization);
 		}
 
 		Map<SyncedCalendar, List<SyncedCalendar>> sourceCalToDestCalMap = new HashMap<>();
@@ -179,7 +154,7 @@ public class CalSyncMain {
 			// System.out.println(" destination calendars: " + destCals);
 			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, sourceCal);
 			syncSourceCalendar(readWriteCalendarService, keywordCategories, sourceCal, eventMap.values(), destCals,
-					destCalEventMap, orgIdMap, categoryIdMap);
+					destCalEventMap);
 			System.out.println("-------------------------");
 		}
 		System.out.println("-------------------------------------------------------");
@@ -198,8 +173,7 @@ public class CalSyncMain {
 
 	private void syncSourceCalendar(Calendar readWriteService, List<KeywordCategory> keywordCategories,
 			SyncedCalendar sourceCal, Collection<Event> sourceEvents, List<SyncedCalendar> destCals,
-			Map<SyncedCalendar, Map<String, Event>> destCalEventMap, Map<Integer, Organization> orgIdMap,
-			Map<Integer, Category> catIdMap) throws IOException {
+			Map<SyncedCalendar, Map<String, Event>> destCalEventMap) throws IOException {
 
 		Set<Category> categories = new HashSet<>();
 
@@ -223,12 +197,6 @@ public class CalSyncMain {
 
 			// check on event organization
 			Organization sourceOrg = sourceCal.getOrganization();
-			int sourceOrgId = sourceOrg.getId();
-			sourceOrg = orgIdMap.get(sourceOrgId);
-			if (sourceOrg == null) {
-				System.err.println("Unknown org id: " + sourceOrgId + " in calendar: " + sourceCal.getName());
-				continue;
-			}
 
 			String description = event.getDescription();
 			if (description != null) {
@@ -243,40 +211,7 @@ public class CalSyncMain {
 			}
 
 			// look for category keywords
-			boolean hasCategory = false;
-			if (description != null) {
-				for (KeywordCategory keyCat : keywordCategories) {
-					String prefix = keyCat.getPrefix();
-					int index = description.indexOf(prefix);
-					if (index < 0) {
-						continue;
-					}
-					// cut out the keyword itself out of the description
-					if (CUT_KEYWORD_FROM_DESCRIPTION) {
-						StringBuilder sb = new StringBuilder();
-						sb.append(description, 0, index);
-						// find the next whitespace character so that we support #lbgt*
-						for (index += prefix.length(); index < description.length(); index++) {
-							if (!Character.isAlphabetic(description.charAt(index))) {
-								break;
-							}
-						}
-						// NOTE: we make assumptions that there is whitespace around this word already
-						if (index < description.length()) {
-							sb.append(description, index, description.length());
-						}
-						event.setDescription(sb.toString().trim());
-					}
-					Category category = catIdMap.get(keyCat.getCategory().getId());
-					if (category == null) {
-						System.err.println(
-								"Unknown category id: " + keyCat.getCategory().getId() + " in event: " + event);
-					} else {
-						categories.add(category);
-					}
-					hasCategory = true;
-				}
-			}
+			boolean hasCategory = findCategories(keywordCategories, categories, event, description);
 
 			// enforce our require-category boolean
 			if (sourceCal.isRequireCategory() && !hasCategory) {
@@ -346,6 +281,40 @@ public class CalSyncMain {
 				// NOTE: deletes are done at the end outside of this method
 			}
 		}
+	}
+
+	private boolean findCategories(List<KeywordCategory> keywordCategories, Set<Category> categories, Event event,
+			String description) {
+		if (description == null) {
+			return false;
+		}
+		boolean hasCategory = false;
+		for (KeywordCategory keyCat : keywordCategories) {
+			String prefix = keyCat.getPrefix();
+			int index = description.indexOf(prefix);
+			if (index < 0) {
+				continue;
+			}
+			// cut out the keyword itself out of the description
+			if (CUT_KEYWORD_FROM_DESCRIPTION) {
+				StringBuilder sb = new StringBuilder();
+				sb.append(description, 0, index);
+				// find the next whitespace character so that we support #lbgt*
+				for (index += prefix.length(); index < description.length(); index++) {
+					if (!Character.isAlphabetic(description.charAt(index))) {
+						break;
+					}
+				}
+				// NOTE: we make assumptions that there is whitespace around this word already
+				if (index < description.length()) {
+					sb.append(description, index, description.length());
+				}
+				event.setDescription(sb.toString().trim());
+			}
+			categories.add(keyCat.getCategory());
+			hasCategory = true;
+		}
+		return hasCategory;
 	}
 
 	private void assignEventFields(Event destEvent, Event sourceEvent) {

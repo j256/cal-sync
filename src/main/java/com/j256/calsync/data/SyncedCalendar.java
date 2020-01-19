@@ -15,10 +15,10 @@ public class SyncedCalendar extends BaseGeneratedIdEntity {
 	@DatabaseField(unique = true)
 	private String name;
 	// type of the calendar if it is specific to a certain calendar group or null if misc or per-event type
-	@DatabaseField(foreign = true)
+	@DatabaseField(foreign = true, foreignAutoRefresh =  true)
 	private Category category;
 	// organization that if specified (and the category is null) will get all organization events
-	@DatabaseField(foreign = true)
+	@DatabaseField(foreign = true, foreignAutoRefresh =  true)
 	private Organization organization;
 	// whether or not a category is required before the entry will be copied into another calendar
 	@DatabaseField
@@ -61,6 +61,10 @@ public class SyncedCalendar extends BaseGeneratedIdEntity {
 
 	public Organization getOrganization() {
 		return organization;
+	}
+	
+	public void setOrganization(Organization organization) {
+		this.organization = organization;
 	}
 
 	public boolean isRequireCategory() {

@@ -11,7 +11,7 @@ public class KeywordCategory extends BaseGeneratedIdEntity {
 
 	@DatabaseField
 	private String prefix;
-	@DatabaseField(foreign = true)
+	@DatabaseField(foreign = true, foreignAutoRefresh =  true)
 	private Category category;
 
 	public KeywordCategory() {
@@ -29,6 +29,10 @@ public class KeywordCategory extends BaseGeneratedIdEntity {
 
 	public Category getCategory() {
 		return category;
+	}
+
+	public void setCategory(Category category) {
+		this.category = category;
 	}
 
 	@Override
