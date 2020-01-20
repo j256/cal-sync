@@ -28,6 +28,8 @@ import com.google.api.services.calendar.model.Event.ExtendedProperties;
 import com.google.api.services.calendar.model.EventAttachment;
 import com.google.api.services.calendar.model.EventDateTime;
 import com.google.api.services.calendar.model.Events;
+import com.j256.calsync.dao.IgnoredEventDao;
+import com.j256.calsync.dao.IgnoredEventDaoImpl;
 import com.j256.calsync.dao.KeywordCategoryDao;
 import com.j256.calsync.dao.KeywordCategoryDaoImpl;
 import com.j256.calsync.dao.SyncPathDao;
@@ -35,6 +37,7 @@ import com.j256.calsync.dao.SyncPathDaoImpl;
 import com.j256.calsync.dao.SyncedCalendarDao;
 import com.j256.calsync.dao.SyncedCalendarDaoImpl;
 import com.j256.calsync.data.Category;
+import com.j256.calsync.data.IgnoredEvent;
 import com.j256.calsync.data.KeywordCategory;
 import com.j256.calsync.data.Organization;
 import com.j256.calsync.data.SyncPath;
@@ -48,13 +51,12 @@ import com.j256.ormlite.jdbc.JdbcConnectionSource;
  */
 public class CalSyncMain {
 
-	private static final String APPLICATION_NAME = "Lexington Calendar Sync";
+	private static final String APPLICATION_NAME = "Calendar Sync";
 	private static final boolean CUT_KEYWORD_FROM_DESCRIPTION = false;
 
 	private static final List<String> READ_ONLY_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR_READONLY);
 	private static final List<String> READ_WRITE_SCOPE = Collections.singletonList(CalendarScopes.CALENDAR);
 
-	private static final String CREDENTIALS_FILE_PATH = "/Lexington_Calendar_Sync_Creds.json";
 	private static final String SOURCE_ID_PROPERTY_NAME = "calsync-source-id";
 
 	private static final long MAX_IN_PAST_MILLIS = Period.days(90).toStandardDuration().getMillis();
@@ -63,23 +65,25 @@ public class CalSyncMain {
 	private static final JsonFactory jsonFactory = JacksonFactory.getDefaultInstance();
 
 	public static void main(String... args) throws Exception {
-		if (args.length != 3) {
-			System.err.println("Usage: java -jar XXX.jar sql-url username password");
+		if (args.length != 4) {
+			System.err.println("Usage: java -jar XXX.jar sql-url username password cred-path");
 			System.exit(1);
 		}
 		String sqlUrl = args[0];
 		String sqlUsername = args[1];
 		String sqlPassword = args[2];
-		new CalSyncMain().doMain(sqlUrl, sqlUsername, sqlPassword);
+		String credentialsFilePath = args[3];
+		new CalSyncMain().doMain(sqlUrl, sqlUsername, sqlPassword, credentialsFilePath);
 	}
 
-	private void doMain(String sqlUrl, String sqlUsername, String sqlPassword) throws Exception {
+	private void doMain(String sqlUrl, String sqlUsername, String sqlPassword, String credentialsFilePath)
+			throws Exception {
 
 		final NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 
-		InputStream in = CalSyncMain.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
+		InputStream in = CalSyncMain.class.getResourceAsStream(credentialsFilePath);
 		GoogleCredential readOnlyCredential = GoogleCredential.fromStream(in).createScoped(READ_ONLY_SCOPE);
-		in = CalSyncMain.class.getResourceAsStream(CREDENTIALS_FILE_PATH);
+		in = CalSyncMain.class.getResourceAsStream(credentialsFilePath);
 		GoogleCredential readWriteCredential = GoogleCredential.fromStream(in).createScoped(READ_WRITE_SCOPE);
 
 		// build a new authorized API client service
@@ -96,15 +100,21 @@ public class CalSyncMain {
 		KeywordCategoryDao keywordCategoryDao = new KeywordCategoryDaoImpl(connectionSource);
 		SyncedCalendarDao syncedCalendarDao = new SyncedCalendarDaoImpl(connectionSource);
 		SyncPathDao syncPathDao = new SyncPathDaoImpl(connectionSource);
+		IgnoredEventDao ignoredEventDao = new IgnoredEventDaoImpl(connectionSource);
 
 		List<SyncedCalendar> syncedCalendars = syncedCalendarDao.queryForAll();
 		List<SyncPath> syncPaths = syncPathDao.queryForAll();
 		List<KeywordCategory> keywordCategories = keywordCategoryDao.queryForAll();
+		List<IgnoredEvent> ignoredEvents = ignoredEventDao.queryForAll();
 		connectionSource.close();
 
 		Map<Integer, SyncedCalendar> calIdMap = new HashMap<>();
 		for (SyncedCalendar syncedCalendar : syncedCalendars) {
 			calIdMap.put(syncedCalendar.getId(), syncedCalendar);
+		}
+		Set<String> ignoredEventIdSet = new HashSet<>();
+		for (IgnoredEvent ignoredEvent : ignoredEvents) {
+			ignoredEventIdSet.add(ignoredEvent.getEventId());
 		}
 
 		Map<SyncedCalendar, List<SyncedCalendar>> sourceCalToDestCalMap = new HashMap<>();
@@ -141,7 +151,7 @@ public class CalSyncMain {
 			if (syncedCal.isSource()) {
 				continue;
 			}
-			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, syncedCal);
+			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, syncedCal, ignoredEventIdSet);
 			destCalEventMap.put(syncedCal, eventMap);
 		}
 		System.out.println("-------------------------------------------------------");
@@ -152,7 +162,7 @@ public class CalSyncMain {
 			List<SyncedCalendar> destCals = entry.getValue();
 			System.out.println("Processing calendar: " + sourceCal.getName());
 			// System.out.println(" destination calendars: " + destCals);
-			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, sourceCal);
+			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, sourceCal, ignoredEventIdSet);
 			syncSourceCalendar(readWriteCalendarService, keywordCategories, sourceCal, eventMap.values(), destCals,
 					destCalEventMap);
 			System.out.println("-------------------------");
@@ -421,8 +431,8 @@ public class CalSyncMain {
 		return true;
 	}
 
-	private Map<String, Event> loadCalendarEntries(Calendar calendarService, SyncedCalendar calendar)
-			throws IOException {
+	private Map<String, Event> loadCalendarEntries(Calendar calendarService, SyncedCalendar calendar,
+			Set<String> ignoredEventIdSet) throws IOException {
 		Map<String, Event> eventMap = new HashMap<>();
 		String nextPageToken = null;
 		DateTime minDateTime = new DateTime(System.currentTimeMillis() - MAX_IN_PAST_MILLIS);
@@ -449,7 +459,15 @@ public class CalSyncMain {
 				// we store the id of the source-event as an "extended property" so we can find it an update it later
 				Map<String, String> privateMap = extendedProperties.getPrivate();
 				if (privateMap == null || !privateMap.containsKey(SOURCE_ID_PROPERTY_NAME)) {
-					eventMap.putIfAbsent(event.getId(), event);
+					// add it to our event map only if it's not in the ignored list
+					if (calendar.isSource() && ignoredEventIdSet.contains(event.getId())) {
+						/*
+						 * We ignored events from source calendars that are in our ignored list but we need to remove
+						 * those entries from destination calendars.
+						 */
+					} else {
+						eventMap.putIfAbsent(event.getId(), event);
+					}
 				} else {
 					eventMap.putIfAbsent(String.valueOf(privateMap.get(SOURCE_ID_PROPERTY_NAME)), event);
 				}
