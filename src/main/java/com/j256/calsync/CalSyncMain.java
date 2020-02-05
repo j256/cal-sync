@@ -82,6 +82,11 @@ public class CalSyncMain {
 		final NetHttpTransport httpTransport = GoogleNetHttpTransport.newTrustedTransport();
 
 		InputStream in = CalSyncMain.class.getResourceAsStream(credentialsFilePath);
+		if (in == null) {
+			System.err.println("creds file not found: " + credentialsFilePath);
+			System.exit(1);
+			return;
+		}
 		GoogleCredential readOnlyCredential = GoogleCredential.fromStream(in).createScoped(READ_ONLY_SCOPE);
 		in = CalSyncMain.class.getResourceAsStream(credentialsFilePath);
 		GoogleCredential readWriteCredential = GoogleCredential.fromStream(in).createScoped(READ_WRITE_SCOPE);
@@ -451,33 +456,36 @@ public class CalSyncMain {
 					.execute();
 			List<Event> eventList = events.getItems();
 			for (Event event : eventList) {
-				ExtendedProperties extendedProperties = event.getExtendedProperties();
-				if (extendedProperties == null) {
-					eventMap.putIfAbsent(event.getId(), event);
-					continue;
-				}
-				// we store the id of the source-event as an "extended property" so we can find it an update it later
-				Map<String, String> privateMap = extendedProperties.getPrivate();
-				if (privateMap == null || !privateMap.containsKey(SOURCE_ID_PROPERTY_NAME)) {
-					// add it to our event map only if it's not in the ignored list
-					if (calendar.isSource() && ignoredEventIdSet.contains(event.getId())) {
-						/*
-						 * We ignored events from source calendars that are in our ignored list but we need to remove
-						 * those entries from destination calendars.
-						 */
-					} else {
-						eventMap.putIfAbsent(event.getId(), event);
-					}
+				String eventId = extractEventId(event);
+				// add it to our event map only if it's not in the ignored list
+				if (calendar.isSource() && ignoredEventIdSet.contains(eventId)) {
+					/*
+					 * We ignored events from source calendars that are in our ignored list but we need to remove those
+					 * entries from destination calendars.
+					 */
+				} else if (eventMap.containsKey(eventId)) {
+					// ignore duplicates
 				} else {
-					eventMap.putIfAbsent(String.valueOf(privateMap.get(SOURCE_ID_PROPERTY_NAME)), event);
-				}
-				if (event.getColorId() != null) {
-					System.out.println("Event " + event.getSummary() + " has color " + event.getColorId());
+					eventMap.put(eventId, event);
 				}
 			}
 			nextPageToken = events.getNextPageToken();
 		} while (nextPageToken != null);
 		System.out.println("Loaded " + eventMap.size() + " events from calendar " + calendar.getName());
 		return eventMap;
+	}
+
+	private String extractEventId(Event event) {
+		ExtendedProperties extendedProperties = event.getExtendedProperties();
+		if (extendedProperties == null) {
+			return event.getId();
+		}
+		// we store the id of the source-event as an "extended property" so we can find it an update it later
+		Map<String, String> privateMap = extendedProperties.getPrivate();
+		if (privateMap == null || !privateMap.containsKey(SOURCE_ID_PROPERTY_NAME)) {
+			return event.getId();
+		} else {
+			return String.valueOf(privateMap.get(SOURCE_ID_PROPERTY_NAME));
+		}
 	}
 }
