@@ -7,6 +7,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -51,6 +52,7 @@ import com.j256.ormlite.jdbc.JdbcConnectionSource;
  */
 public class CalSyncMain {
 
+	private static final String FROM_CALENDAR_STRING = "From calendar: ";
 	private static final String APPLICATION_NAME = "Calendar Sync";
 	private static final boolean CUT_KEYWORD_FROM_DESCRIPTION = false;
 
@@ -148,15 +150,30 @@ public class CalSyncMain {
 			}
 		}
 
-		Map<SyncedCalendar, Map<String, Event>> destCalEventMap = new HashMap<>();
+		System.out.println("Loading source calendars:");
 
+		Map<SyncedCalendar, Collection<Event>> sourceCalendarEntryMap = new HashMap<>();
+		for (SyncedCalendar sourceCal : sourceCalToDestCalMap.keySet()) {
+			Map<String, Event> eventMap =
+					loadCalendarEntries(readOnlyCalendarService, sourceCal, ignoredEventIdSet, true);
+			Collection<Event> events = eventMap.values();
+			sourceCalendarEntryMap.put(sourceCal, events);
+		}
+
+		// remove duplicates that overlap
+		removeDuplicates(sourceCalendarEntryMap);
+
+		System.out.println("-------------------------------------------------------");
 		System.out.println("Loading destination calendars:");
+
+		Map<SyncedCalendar, Map<String, Event>> destCalEventMap = new HashMap<>();
 		// open each destination calendar and load all of its events into our map
 		for (SyncedCalendar syncedCal : syncedCalendars) {
 			if (syncedCal.isSource()) {
 				continue;
 			}
-			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, syncedCal, ignoredEventIdSet);
+			Map<String, Event> eventMap =
+					loadCalendarEntries(readOnlyCalendarService, syncedCal, ignoredEventIdSet, false);
 			destCalEventMap.put(syncedCal, eventMap);
 		}
 		System.out.println("-------------------------------------------------------");
@@ -167,8 +184,12 @@ public class CalSyncMain {
 			List<SyncedCalendar> destCals = entry.getValue();
 			System.out.println("Processing calendar: " + sourceCal.getName());
 			// System.out.println(" destination calendars: " + destCals);
-			Map<String, Event> eventMap = loadCalendarEntries(readOnlyCalendarService, sourceCal, ignoredEventIdSet);
-			syncSourceCalendar(readWriteCalendarService, keywordCategories, sourceCal, eventMap.values(), destCals,
+			Collection<Event> events = sourceCalendarEntryMap.get(sourceCal);
+			if (events == null) {
+				System.err.println("Source-calendar has no entries in map: " + sourceCal);
+				continue;
+			}
+			syncSourceCalendar(readWriteCalendarService, keywordCategories, sourceCal, events, destCals,
 					destCalEventMap);
 			System.out.println("-------------------------");
 		}
@@ -182,6 +203,48 @@ public class CalSyncMain {
 			for (Event event : destEvents.values()) {
 				System.out.println("Removing event '" + event.getSummary() + "' from calendar: " + destCal.getName());
 				readWriteCalendarService.events().delete(destCal.getGoogleId(), event.getId()).execute();
+			}
+		}
+	}
+
+	private void removeDuplicates(Map<SyncedCalendar, Collection<Event>> sourceCalendarEntryMap) {
+
+		// note this uses object hashcode/equals
+		Map<Event, WrappedEvent> masterSourceEvents = new HashMap<>();
+
+		// run through the source events
+		for (Collection<Event> events : sourceCalendarEntryMap.values()) {
+			for (Event event : events) {
+				masterSourceEvents.put(event, new WrappedEvent(event));
+			}
+		}
+
+		// go through using n^2 logic (~1000 entries tops) to see if any are overlapping
+		List<WrappedEvent> wrappedList = new ArrayList<>(masterSourceEvents.values());
+		for (WrappedEvent first : wrappedList) {
+			for (WrappedEvent second : wrappedList) {
+				if (first != second && first.isSimilar(second)) {
+					if (first.compareTo(second) >= 0) {
+						masterSourceEvents.remove(second.getEvent());
+						System.out.println("Removed second event scores " + first.calcScore() + "," + second.calcScore()
+								+ ": " + first + ", " + second);
+					} else {
+						masterSourceEvents.remove(first.getEvent());
+						System.out.println("Removed first event scores " + first.calcScore() + "," + second.calcScore()
+								+ ": " + first + ", " + second);
+					}
+				}
+			}
+		}
+
+		// now go back through the source calendar entries to make sure they are still in the master list
+		for (Collection<Event> entries : sourceCalendarEntryMap.values()) {
+			Iterator<Event> iterator = entries.iterator();
+			while (iterator.hasNext()) {
+				Event event = iterator.next();
+				if (!masterSourceEvents.containsKey(event)) {
+					iterator.remove();
+				}
 			}
 		}
 	}
@@ -217,6 +280,14 @@ public class CalSyncMain {
 			if (description != null) {
 				description = description.trim();
 			}
+			if (description == null || description.isEmpty()) {
+				// System.out.println("Skipping event with no description: " + event);
+				continue;
+			}
+			if (description.contains(FROM_CALENDAR_STRING)) {
+				System.out.println("Event was copied from another calendar: " + event);
+				continue;
+			}
 
 			// determine the event categories
 			categories.clear();
@@ -230,18 +301,17 @@ public class CalSyncMain {
 
 			// enforce our require-category boolean
 			if (sourceCal.isRequireCategory() && !hasCategory) {
-				// System.out.println("Skipping event with no categories");
+				// System.out.println("Skipping event with no categories: " + event);
 				continue;
 			}
 
 			System.out.println("Event " + event.getSummary() + " found category(s): " + categories);
 
+			String normalizedDescription = normalizedDescription(description);
+
 			StringBuilder sb = new StringBuilder();
-			String normalDescription = event.getDescription();
-			if (normalDescription != null) {
-				sb.append(normalDescription).append("\n\n");
-			}
-			sb.append("From calendar: ").append(sourceOrg.getName()).append(".");
+			sb.append(normalizedDescription).append("\n\n");
+			sb.append(FROM_CALENDAR_STRING).append(sourceOrg.getName()).append(".");
 			String orgDescription = sb.toString();
 
 			// for each dest-cal which matches org or category, see if it has the event
@@ -261,7 +331,7 @@ public class CalSyncMain {
 				if (destOrg == null || !destOrg.equals(sourceOrg)) {
 					event.setDescription(orgDescription);
 				} else {
-					event.setDescription(normalDescription);
+					event.setDescription(normalizedDescription);
 				}
 				if (sourceOrg.getColor() != null) {
 					event.setColorId(Integer.toString(sourceOrg.getColor().getId()));
@@ -298,6 +368,33 @@ public class CalSyncMain {
 		}
 	}
 
+	private String normalizedDescription(String desc) {
+		StringBuilder sb = new StringBuilder();
+		char prev = '\0';
+		char prevPrev = '\0';
+		for (char ch : desc.toCharArray()) {
+			if (ch == '\r') {
+				// remove all \r
+				continue;
+			} else if (ch == '\t') {
+				// XXX convert \t to space, need to see if this looks good
+				sb.append(' ');
+			} else if (ch == '\n') {
+				if (prevPrev == '\n' && prev == '\n') {
+					// only take 2 \n's in a row
+				} else {
+					sb.append(ch);
+				}
+			} else {
+				sb.append(ch);
+			}
+			prevPrev = prev;
+			prev = ch;
+		}
+		String result = sb.toString();
+		return result.trim();
+	}
+
 	private boolean findCategories(List<KeywordCategory> keywordCategories, Set<Category> categories, Event event,
 			String description) {
 		if (description == null) {
@@ -321,7 +418,7 @@ public class CalSyncMain {
 					}
 				}
 				// NOTE: we make assumptions that there is whitespace around this word already
-				if (index < description.length()) {
+				if (index <= description.length()) {
 					sb.append(description, index, description.length());
 				}
 				event.setDescription(sb.toString().trim());
@@ -344,7 +441,7 @@ public class CalSyncMain {
 		destEvent.setColorId(sourceEvent.getColorId());
 		// we store the id of the source-event as an "extended property" so we can find it an update it later
 		ExtendedProperties extendedProperties = new ExtendedProperties();
-		extendedProperties.setPrivate(Collections.singletonMap(SOURCE_ID_PROPERTY_NAME, sourceEvent.getId()));
+		extendedProperties.setShared(Collections.singletonMap(SOURCE_ID_PROPERTY_NAME, sourceEvent.getId()));
 		destEvent.setExtendedProperties(extendedProperties);
 	}
 
@@ -415,10 +512,10 @@ public class CalSyncMain {
 				System.out.println("  Attachment file-url different: " + sourceAttachment + " != " + destAttachment);
 				return false;
 			}
-			if (!Objects.equals(sourceAttachment.getIconLink(), destAttachment.getIconLink())) {
-				System.out.println("  Attachment icon-link different: " + sourceAttachment + " != " + destAttachment);
-				return false;
-			}
+			// if (!Objects.equals(sourceAttachment.getIconLink(), destAttachment.getIconLink())) {
+			// System.out.println(" Attachment icon-link different: " + sourceAttachment + " != " + destAttachment);
+			// return false;
+			// }
 			if (!Objects.equals(sourceAttachment.getMimeType(), destAttachment.getMimeType())) {
 				System.out.println("  Attachment mime-type different: " + sourceAttachment + " != " + destAttachment);
 				return false;
@@ -437,7 +534,7 @@ public class CalSyncMain {
 	}
 
 	private Map<String, Event> loadCalendarEntries(Calendar calendarService, SyncedCalendar calendar,
-			Set<String> ignoredEventIdSet) throws IOException {
+			Set<String> ignoredEventIdSet, boolean sourceCal) throws IOException {
 		Map<String, Event> eventMap = new HashMap<>();
 		String nextPageToken = null;
 		DateTime minDateTime = new DateTime(System.currentTimeMillis() - MAX_IN_PAST_MILLIS);
@@ -465,6 +562,10 @@ public class CalSyncMain {
 					 */
 				} else if (eventMap.containsKey(eventId)) {
 					// ignore duplicates
+				} else if (sourceCal && (event.getSummary() == null || event.getSummary().isEmpty())) {
+					// skipping event with no summary
+				} else if (sourceCal && (event.getDescription() == null || event.getDescription().isEmpty())) {
+					// skipping event with no description
 				} else {
 					eventMap.put(eventId, event);
 				}
@@ -481,7 +582,7 @@ public class CalSyncMain {
 			return event.getId();
 		}
 		// we store the id of the source-event as an "extended property" so we can find it an update it later
-		Map<String, String> privateMap = extendedProperties.getPrivate();
+		Map<String, String> privateMap = extendedProperties.getShared();
 		if (privateMap == null || !privateMap.containsKey(SOURCE_ID_PROPERTY_NAME)) {
 			return event.getId();
 		} else {
