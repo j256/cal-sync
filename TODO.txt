@@ -15,3 +15,10 @@
 - how do we handle having a contact (the leader) and how to protect their personal information
 - maybe have explicit sync rules:
 	- this calendar goes to that one but only if a category is set but goes into this other calendar regardless
+
+------------------------------------------------------------------------------------------------------------------
+
+- cleanup entries:
+	- require a proper maps link, 
+
+------------------------------------------------------------------------------------------------------------------
