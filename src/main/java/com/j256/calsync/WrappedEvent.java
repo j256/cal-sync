@@ -2,11 +2,13 @@ package com.j256.calsync;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import com.google.api.services.calendar.model.Event;
 import com.google.api.services.calendar.model.EventAttachment;
 import com.google.api.services.calendar.model.EventDateTime;
+import com.google.api.services.calendar.model.Event.ExtendedProperties;
 
 /**
  * Class which wraps an event class which allows us to sort by date/time and find similar entries on the same day.
@@ -14,6 +16,9 @@ import com.google.api.services.calendar.model.EventDateTime;
  * @author graywatson
  */
 public class WrappedEvent implements Comparable<WrappedEvent> {
+
+	// property in the public properties for each event which has our sync-id
+	public static final String SOURCE_ID_PROPERTY_NAME = "calsync-source-id";
 
 	private static final Double SUMMARY_SCORE_AWARD = 1.0;
 	private static final Double LOCATION_SCORE_AWARD = 1.0;
@@ -30,6 +35,7 @@ public class WrappedEvent implements Comparable<WrappedEvent> {
 	private static final int DESCRIPTION_BAD_NUM_WORDS = 10;
 	private static final int DESCRIPTION_GOOD_NUM_WORDS = 40;
 
+	private final String syncId;
 	private final Event event;
 	private final long startTimeMillis;
 	private final long endTimeMillis;
@@ -47,6 +53,7 @@ public class WrappedEvent implements Comparable<WrappedEvent> {
 			this.startTimeMillis = maybeStart;
 			this.endTimeMillis = maybeStart + (firstEnd - firstStart);
 		}
+		this.syncId = extractSyncId(event, this.startTimeMillis);
 	}
 
 	/**
@@ -112,8 +119,32 @@ public class WrappedEvent implements Comparable<WrappedEvent> {
 				|| (startTimeMillis > other.startTimeMillis && startTimeMillis < other.endTimeMillis);
 	}
 
+	public String getSyncId() {
+		return syncId;
+	}
+
+	public String getEventId() {
+		return event.getId();
+	}
+
+	public String getSummary() {
+		return event.getSummary();
+	}
+
+	public String getDescription() {
+		return event.getDescription();
+	}
+
+	public void setDescription(String description) {
+		event.setDescription(description);
+	}
+
 	public Event getEvent() {
 		return event;
+	}
+
+	public long getStartTimeMillis() {
+		return startTimeMillis;
 	}
 
 	@Override
@@ -126,11 +157,39 @@ public class WrappedEvent implements Comparable<WrappedEvent> {
 		return event.toString();
 	}
 
+	@Override
+	public int hashCode() {
+		return event.hashCode();
+	}
+
+	@Override
+	public boolean equals(Object other) {
+		return event.equals(other);
+	}
+
 	private static long eventTimeToMillis(EventDateTime dateTime) {
 		if (dateTime == null || dateTime.getDateTime() == null) {
 			return 0;
 		} else {
 			return dateTime.getDateTime().getValue();
+		}
+	}
+
+	private static String extractSyncId(Event event, long startTimeMillis) {
+		ExtendedProperties extendedProperties = event.getExtendedProperties();
+		if (extendedProperties == null) {
+			return event.getId();
+		}
+		// we store the id of the source-event as an "extended property" so we can find it an update it later
+		Map<String, String> privateMap = extendedProperties.getShared();
+		if (privateMap == null || !privateMap.containsKey(SOURCE_ID_PROPERTY_NAME)) {
+			String id = event.getId();
+			if (event.getOriginalStartTime() != null) {
+				id += "-" + startTimeMillis;
+			}
+			return id;
+		} else {
+			return String.valueOf(privateMap.get(SOURCE_ID_PROPERTY_NAME));
 		}
 	}
 
