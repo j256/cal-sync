@@ -18,7 +18,7 @@
 		<postgresql-version>8.3-603.jdbc3</postgresql-version>
 		<!-- tests -->
 		<easymock-version>2.3</easymock-version>
-		<junit-version>4.8.1</junit-version>
+		<junit-version>4.13.1</junit-version>
 		<h2-version>1.4.191</h2-version>
 	</properties>
 	<build>
